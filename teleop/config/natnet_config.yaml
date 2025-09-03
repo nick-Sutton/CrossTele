@@ -1,0 +1,13 @@
+natnet_config:
+    connection_type: "Unicast" # Unicast / Multicast
+    server_address: "198.17.0.120"
+    local_address: "198.17.0.48"
+    multicast_address: "239.255.42.99"
+    command_port: 1510
+    data_port: 1511
+    rigid_body_name: "ground"
+    lastFrameNumber: 0
+    frameCount: 0
+    droppedFrameCount: 0
+    n_markers: 0
+    n_unlabeled_markers: 0

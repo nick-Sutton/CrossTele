@@ -1,0 +1,5 @@
+
+command: ./teleop.py --online --optitrack
+command: ./teleop.py --offline
+
+maybe let the cross tele program set up mpac mujoco and mpac_go2

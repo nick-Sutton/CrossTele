@@ -1,0 +1,5 @@
+Meeting Notes
+    - Gait selection
+    - Velocities for rigid bodies(Twist?)
+    - solving controller descp(Controller may not be able to move as fast as human moves)
+    - I want to be able to swap out the controller for other controllers with similar command structures

@@ -1,0 +1,12 @@
+# File path to your controller
+path:
+    path_to_command: ""
+
+# Define the structure and order of the commands being sent to your controller
+command:
+    arg1: ""
+    arg2: ""
+    arg3: ""
+    arg4: ""
+
+    # argN (if you need more args)
