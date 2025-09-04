@@ -3,3 +3,11 @@ Meeting Notes
     - Velocities for rigid bodies(Twist?)
     - solving controller descp(Controller may not be able to move as fast as human moves)
     - I want to be able to swap out the controller for other controllers with similar command structures
+
+    -scaling of the velocities are greater than the controller can handel
+        - In this case I think the robot should still try to traverse the same distance but with more walk commands in between
+        - Instead of having twist as a matric just use the two velocities
+        - We need to perform a cordinate transformation
+
+    -Example Command from CrossTele directory
+        python3 teleop/src/teleop.py --input_mode=offline --io_mode=mujoco --input_file=./training/dataset/FormattedData/Walk_forward_000.csv

@@ -4,13 +4,15 @@ from time import sleep
 import pandas as pd
 import argparse as arg
 import copy
-from io_parser import IOParser
-from pose import Pose
-import ct_math as m
+from ct_io.io_parser import IOParser
+from pose.pose import Pose
+import ct_math.ct_math as ctm
 
 # Import the mpac_go2 python controller interface
-mpac_go2 = "../../../mpac_go2/atnmy/"
-sys.path.append(mpac_go2 )
+mpac_go2_atnmy = "../mpac/mpac_go2/atnmy/"
+print(os.path.exists(mpac_go2_atnmy))
+sys.path.append(mpac_go2_atnmy)
+
 import mpac_cmd
 
 def retarget_motion(obj_twist):
@@ -73,22 +75,29 @@ def main():
                                 df.at[(1, "Waist:Rotation:W")], df.at[(1, "Waist:Position:X")], df.at[(1, "Waist:Position:Y")], df.at[(1, "Waist:Rotation:Z")])
 
         mpac_cmd.stand_idqp()
-        sleep(2)
+        sleep(1)
 
         mpac_cmd.walk_idqp(0.25, 0, 0, 0)
         sleep(1)    
         for index, row in df.iloc[2:].iterrows():
-            waist_twist = m.twist(waist_curr_pose, waist_prev_pose, waist_curr_pose.timestep - waist_prev_pose.timestep)
+            #waist_twist = ctm.twist(waist_curr_pose, waist_prev_pose, waist_curr_pose.timestep - waist_prev_pose.timestep)
+            waist_lv = ctm.linear_velocity(waist_curr_pose, waist_prev_pose, waist_curr_pose.timestep - waist_prev_pose.timestep)
+            waist_av = ctm.angular_velocity(waist_curr_pose, waist_prev_pose, waist_curr_pose.timestep - waist_prev_pose.timestep)
 
             # Retarget motion
-            retargetted_motion = retarget_motion(waist_twist)
+            #retargetted_motion = 0.1*retarget_motion(waist_twist)
 
             # Call Mpac function
             # we need to perform a cordinate frame transformation
             print("\n------------------------CrossTele------------------------")
-            print(retargetted_motion)
+            print(f"LV: {waist_lv}")
+            print(f"AV: {waist_av}")
             print("-----------------------------------------------------------")
-            mpac_cmd.walk_idqp(0.25, retargetted_motion[0, 3], retargetted_motion[1, 3], retargetted_motion[1, 0])    
+
+            #if (waist_lv[0] >= 0.4) {
+            #
+            #}
+            mpac_cmd.walk_idqp(0.25, 0.00001 * waist_lv[0], 0.00001 * waist_lv[1], 0.00001 * waist_av[2])    
             waist_prev_pose = copy.deepcopy(waist_curr_pose)
 
             waist_curr_pose.timestep = row["Time (Seconds)"]
@@ -116,9 +125,6 @@ def main():
         pass
     else:
         parser.error("Could not recognize commands")
-
-    
-
 
 if __name__ == "__main__":
     main()
