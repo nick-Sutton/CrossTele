@@ -1,9 +1,8 @@
 import os
 import sys
+import copy
 from time import sleep
 import pandas as pd
-import argparse as arg
-import copy
 from ct_io.io_parser import IOParser
 from pose.pose import Pose
 import ct_math.ct_math as ctm
@@ -15,8 +14,19 @@ sys.path.append(mpac_go2_atnmy)
 
 import mpac_cmd
 
-def retarget_motion(obj_twist):
-    return obj_twist
+
+def get_robot_orientation():
+    # Get the robots current orientation
+    tlm_data = mpac_cmd.get_tlm_data()
+    if isinstance(tlm_data, list):
+        r_roll, r_pitch, r_yaw = tlm_data[0]["q"][3:6]  # First robot
+    else:
+        r_roll, r_pitch, r_yaw = tlm_data["q"][3:6]     # Single robot
+
+    # Convert eular to quat
+    robot_orientation = ctm.eular_to_quat(r_roll, r_pitch, r_yaw)
+
+    return robot_orientation
 
 def main():
 
@@ -55,7 +65,6 @@ def main():
 
     print("\n--------------------CrossTele--------------------")
     print(f"Running with input_mode={args.input_mode}, io_mode={args.io_mode}")
-    print("-------------------------------------------------\n")
 
     # parse controller command config
     IOParser.parse_controller_config()
@@ -66,49 +75,55 @@ def main():
     elif args.input_mode == "offline" and args.io_mode == "mujoco":
         df = pd.read_csv(args.input_file)
 
+        # Make the robot stand and wait a second to give it time
+        mpac_cmd.stand_idqp()
+        sleep(2)
+
+        # Start marching in place
+        mpac_cmd.walk_idqp(vx= 0, vy = 0, vrz = 0)
+        sleep(2) 
+
         # At frame 0  (timesep 0)
         waist_prev_pose = Pose(df.at[(0, "Time (Seconds)")], df.at[(0, "Waist:Rotation:X")], df.at[(0, "Waist:Rotation:Y")], df.at[(0, "Waist:Rotation:Z")],
-                                df.at[(0, "Waist:Rotation:W")], df.at[(0, "Waist:Position:X")], df.at[(0, "Waist:Position:Y")], df.at[(0, "Waist:Rotation:Z")])
-        
-        # At frame 1 (timestep ~0.05)
-        waist_curr_pose = Pose(df.at[(1, "Time (Seconds)")], df.at[(1, "Waist:Rotation:X")], df.at[(1, "Waist:Rotation:Y")], df.at[(1, "Waist:Rotation:Z")],
-                                df.at[(1, "Waist:Rotation:W")], df.at[(1, "Waist:Position:X")], df.at[(1, "Waist:Position:Y")], df.at[(1, "Waist:Rotation:Z")])
+                                df.at[(0, "Waist:Rotation:W")], df.at[(0, "Waist:Position:X")], df.at[(0, "Waist:Position:Y")], df.at[(0, "Waist:Position:Z")])
+    
 
-        mpac_cmd.stand_idqp()
-        sleep(1)
+        for index, row in df.iloc[1:].iterrows(): # At frame 1 (timestep ~0.05)
 
-        mpac_cmd.walk_idqp(0.25, 0, 0, 0)
-        sleep(1)    
-        for index, row in df.iloc[2:].iterrows():
-            #waist_twist = ctm.twist(waist_curr_pose, waist_prev_pose, waist_curr_pose.timestep - waist_prev_pose.timestep)
-            waist_lv = ctm.linear_velocity(waist_curr_pose, waist_prev_pose, waist_curr_pose.timestep - waist_prev_pose.timestep)
-            waist_av = ctm.angular_velocity(waist_curr_pose, waist_prev_pose, waist_curr_pose.timestep - waist_prev_pose.timestep)
+            # Update current pose with this frame's data
+            waist_curr_pose = Pose(row["Time (Seconds)"], row["Waist:Rotation:X"], row["Waist:Rotation:Y"], row["Waist:Rotation:Z"], row["Waist:Rotation:W"], 
+                                row["Waist:Position:X"], row["Waist:Position:Y"], row["Waist:Position:Z"])
+    
+            # Calculate dt
+            dt = waist_curr_pose.timestep - waist_prev_pose.timestep
+            
+            # Calculate velocities
+            dt = waist_curr_pose.timestep - waist_prev_pose.timestep
+            waist_lv = ctm.linear_velocity(waist_curr_pose, waist_prev_pose, dt)
+            waist_av = ctm.angular_velocity(waist_curr_pose, waist_prev_pose, dt)
+            
+            robot_orientation = get_robot_orientation()
+            robot_lv, robot_av = ctm.transform_cordinate_frame(waist_lv, waist_av, robot_orientation)
+            
+            print(f"\n------------------------CrossTele-----------------------")
+            print(f"Timestep: {row["Time (Seconds)"]}")
+            print(f"Human LV: {waist_lv}")
+            print(f"Human AV: {waist_av}")
 
-            # Retarget motion
-            #retargetted_motion = 0.1*retarget_motion(waist_twist)
-
-            # Call Mpac function
-            # we need to perform a cordinate frame transformation
-            print("\n------------------------CrossTele------------------------")
-            print(f"LV: {waist_lv}")
-            print(f"AV: {waist_av}")
+            print(f"Robot LV: {robot_lv}")
+            print(f"Robot AV: {robot_av}")
             print("-----------------------------------------------------------")
+            
+            # If you need to scale the values change this variable
+            scale = 1
 
-            #if (waist_lv[0] >= 0.4) {
-            #
-            #}
-            mpac_cmd.walk_idqp(0.25, 0.00001 * waist_lv[0], 0.00001 * waist_lv[1], 0.00001 * waist_av[2])    
+            mpac_cmd.walk_idqp(vx=scale * robot_lv[0], vy=scale * robot_lv[1], vrz=scale * robot_av[2])
+
+            # Sleep for the duration of the time-step
+            sleep(dt)
+
+            # Update previous pose for next iteration
             waist_prev_pose = copy.deepcopy(waist_curr_pose)
-
-            waist_curr_pose.timestep = row["Time (Seconds)"]
-            waist_curr_pose.orientationX = row["Waist:Rotation:X"]
-            waist_curr_pose.orientationY= row["Waist:Rotation:Y"]
-            waist_curr_pose.orientationZ= row["Waist:Rotation:Z"]
-            waist_curr_pose.orientationW= row["Waist:Rotation:W"]
-
-            waist_curr_pose.positionX = row["Waist:Position:X"]
-            waist_curr_pose.positionY= row["Waist:Position:Y"]
-            waist_curr_pose.positionZ= row["Waist:Position:Z"]
 
         mpac_cmd.hard_stop()
 
