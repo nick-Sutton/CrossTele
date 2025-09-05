@@ -42,28 +42,34 @@ def angular_velocity(current_pose, previous_pose, dt):
 def eular_to_quat(roll, pitch, yaw):
     return st.Rotation.from_euler("xyz", [roll, pitch, yaw]).as_quat()
 
+def remap_cordinate_system(linear_vel, angular_vel):
+        # Remap coordinate axes with corrected direction
+    lv_remapped = np.array([
+        -linear_vel[1],  # Human -Y (backward) -> Robot X (forward)
+        -linear_vel[0],  # Human -X (left) -> Robot Y (left)
+        linear_vel[2]    # Human Z (up) -> Robot Z (up)
+    ])
+    
+    av_remapped = np.array([
+        -angular_vel[1],
+        -angular_vel[0], 
+        angular_vel[2]
+    ])
+
+    return lv_remapped, av_remapped
+
 def transform_cordinate_frame(human_linear_vel, human_angular_vel, robot_orientation):
     """
     Convert human velocities to robot reference frame with axis remapping.
     """
     
     # Remap coordinate axes with corrected direction
-    human_remapped = np.array([
-        -human_linear_vel[1],  # Human -Y (backward) -> Robot X (forward)
-        -human_linear_vel[0],  # Human -X (left) -> Robot Y (left)
-        human_linear_vel[2]    # Human Z (up) -> Robot Z (up)
-    ])
-    
-    human_av_remapped = np.array([
-        -human_angular_vel[1],
-        -human_angular_vel[0], 
-        human_angular_vel[2]
-    ])
+    human_lv_remapped, human_av_remapped = remap_cordinate_system(human_linear_vel, human_angular_vel)
     
     # Transform from world frame to robot's local frame
     R_world_to_robot = st.Rotation.from_quat(robot_orientation).inv()
     
-    robot_linear_vel = R_world_to_robot.apply(human_remapped)
+    robot_linear_vel = R_world_to_robot.apply(human_lv_remapped)
     robot_angular_vel = R_world_to_robot.apply(human_av_remapped)
     
     return robot_linear_vel, robot_angular_vel
