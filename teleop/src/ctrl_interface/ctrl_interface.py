@@ -1,5 +1,6 @@
 import os
 import sys
+from pose.pose import Pose
 import ct_math.ct_math as ctm
 
 # Import the mpac_go2 python controller interface
@@ -13,16 +14,16 @@ class CtrlInterface():
     def __init__(self):
         pass
 
-    def walk(vx, vy, vrz):
+    def walk(vx=0, vy=0, vrz=0):
         mpac_cmd.walk_idqp(h=0.25,vx=vx, vy=vy, vrz=vrz)
 
-    def stand(rx, ry, rz):
+    def stand(rx=0, ry=0, rz=0):
         mpac_cmd.stand_idqp(h=0.25, rx=rx, ry=ry, rz=rz)
 
-    def bound(vx):
+    def bound(vx=0):
         mpac_cmd.bound(vx=vx)
 
-    def jump(vx, vy, vz):
+    def jump(vx=0, vy=0, vz=0):
         mpac_cmd.jump(x_vel=vx, y_vel=vy, z_vel=vz)
 
     def land():
@@ -49,3 +50,11 @@ class CtrlInterface():
         robot_orientation = ctm.eular_to_quat(r_roll, r_pitch, r_yaw)
 
         return robot_orientation
+        
+    def get_robot_position():
+        """Get the robot's current position (x, y, z)"""
+        tlm_data = mpac_cmd.get_tlm_data()
+        
+        position = tlm_data["q"][:3]  # x, y, z position
+
+        return position

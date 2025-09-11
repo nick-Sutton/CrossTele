@@ -11,3 +11,32 @@ Meeting Notes
 
     -Example Command from CrossTele directory
         python3 teleop/src/teleop.py --input_mode=offline --io_mode=mujoco --input_file=./training/dataset/FormattedData/Walk_forward_000.csv
+
+
+Tasks:
+    Get Some performance metrics.
+        - Add human to mujoco scene
+        - Add performance logging for each timestep
+        - Read some papers on what performance metrics to use
+
+    Possible metrics:
+        - Tracking accuracy
+        - Tracking speed (how fast can we go from receiving info to the robot moving)
+
+    Introduce Type hints into the codebase:
+
+-Get human gat periodcity for Phases at each time step
+
+        #metrics = {
+        #    'rmse': np.sqrt(np.mean(pos_error**2)),     # Root mean square Error
+        #    'mae': np.mean(pos_error),                  # mean error
+        #    'max_error': np.max(pos_error),             # max error
+        #    'std_error': np.std(pos_error),             # standard error
+        #    'median_error': np.median(pos_error)        # median error
+        #}
+
+Logs
+    -date/time
+        -metadata.yaml
+        -metrics.csv
+        -summary.yaml

@@ -42,34 +42,79 @@ def angular_velocity(current_pose, previous_pose, dt):
 def eular_to_quat(roll, pitch, yaw):
     return st.Rotation.from_euler("xyz", [roll, pitch, yaw]).as_quat()
 
-def remap_cordinate_system(linear_vel, angular_vel):
-        # Remap coordinate axes with corrected direction
-    lv_remapped = np.array([
-        -linear_vel[1],  # Human -Y (backward) -> Robot X (forward)
-        -linear_vel[0],  # Human -X (left) -> Robot Y (left)
-        linear_vel[2]    # Human Z (up) -> Robot Z (up)
-    ])
-    
-    av_remapped = np.array([
-        -angular_vel[1],
-        -angular_vel[0], 
-        angular_vel[2]
-    ])
-
-    return lv_remapped, av_remapped
-
-def transform_cordinate_frame(human_linear_vel, human_angular_vel, robot_orientation):
+def transform_cordinate_frame(source_linear_vel, source_angular_vel, target_orientation):
     """
-    Convert human velocities to robot reference frame with axis remapping.
+    Convert source velocities to target reference frame with axis remapping.
     """
     
     # Remap coordinate axes with corrected direction
-    human_lv_remapped, human_av_remapped = remap_cordinate_system(human_linear_vel, human_angular_vel)
+    #source_lv_remapped, source_av_remapped = remap_cordinate_system(source_linear_vel, source_angular_vel)
     
-    # Transform from world frame to robot's local frame
-    R_world_to_robot = st.Rotation.from_quat(robot_orientation).inv()
+    # Transform from world frame to target's local frame
+    R_world_to_target = st.Rotation.from_quat(target_orientation).inv()
     
-    robot_linear_vel = R_world_to_robot.apply(human_lv_remapped)
-    robot_angular_vel = R_world_to_robot.apply(human_av_remapped)
+    target_linear_vel = R_world_to_target.apply(source_linear_vel)
+    target_angular_vel = R_world_to_target.apply(source_angular_vel)
     
-    return robot_linear_vel, robot_angular_vel
+    return target_linear_vel, target_angular_vel
+
+def apply_coordinate_transformation(df):
+    """
+    Apply coordinate system transformation to a motion capture DataFrame
+    
+    Args:
+        df: DataFrame with motion capture data (formatted with RigidBodyName:Type:Axis columns)
+        transform_coords: Whether to apply the coordinate transformation
+    
+    Returns:
+        DataFrame with transformed coordinates (if transform_coords=True)
+    """
+    df_transformed = df.copy()
+    
+    # Find all unique rigid body names
+    rigid_body_names = set()
+    for col in df.columns:
+        if ':' in col:
+            parts = col.split(':')
+            if len(parts) >= 2:
+                rigid_body_names.add(parts[0])
+    
+    print(f"Applying coordinate transformation to {len(rigid_body_names)} rigid bodies...")
+    
+    for rb_name in rigid_body_names:
+        # Transform Position data
+        pos_x_col = f"{rb_name}:Position:X"
+        pos_y_col = f"{rb_name}:Position:Y"
+        pos_z_col = f"{rb_name}:Position:Z"
+        
+        if all(col in df.columns for col in [pos_x_col, pos_y_col, pos_z_col]):
+            # Store original values
+            orig_x = df[pos_x_col].values.copy()
+            orig_y = df[pos_y_col].values.copy()
+            orig_z = df[pos_z_col].values.copy()
+            
+            # Apply transformation: [x, y, z] -> [-y, -x, z]
+            df_transformed[pos_x_col] = -orig_y  # New X = -original Y
+            df_transformed[pos_y_col] = -orig_x  # New Y = -original X
+            df_transformed[pos_z_col] = orig_z   # New Z = original Z
+        
+        # Transform Rotation data (quaternions)
+        rot_x_col = f"{rb_name}:Rotation:X"
+        rot_y_col = f"{rb_name}:Rotation:Y"
+        rot_z_col = f"{rb_name}:Rotation:Z"
+        rot_w_col = f"{rb_name}:Rotation:W"
+        
+        if all(col in df.columns for col in [rot_x_col, rot_y_col, rot_z_col, rot_w_col]):
+            # Store original quaternion components
+            orig_qx = df[rot_x_col].values.copy()
+            orig_qy = df[rot_y_col].values.copy()
+            orig_qz = df[rot_z_col].values.copy()
+            orig_qw = df[rot_w_col].values.copy()
+            
+            # Apply same transformation to quaternion components
+            df_transformed[rot_x_col] = -orig_qy  # New qx = -original qy
+            df_transformed[rot_y_col] = -orig_qx  # New qy = -original qx
+            df_transformed[rot_z_col] = orig_qz   # New qz = original qz
+            df_transformed[rot_w_col] = orig_qw   # qw unchanged
+    
+    return df_transformed

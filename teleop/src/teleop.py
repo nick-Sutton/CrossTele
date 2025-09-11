@@ -1,64 +1,106 @@
 import os
 import sys
 import copy
-from time import sleep
+from time import sleep, perf_counter
 import pandas as pd
 from ct_io.io_parser import IOParser
+from ct_io.performance_metrics import PerformanceMetrics
 from pose.pose import Pose
+from pose.twist import Twist
 from ctrl_interface.ctrl_interface import CtrlInterface
 import ct_math.ct_math as ctm
 
 def run_offline_mode(args):
         df = pd.read_csv(args.input_file)
+        df = ctm.apply_coordinate_transformation(df)
+
+        # key: rigid body name, value: Pose at current timestep
+        source_curr_pose = {}
+        source_prev_pose = {}
+
+        target_pose = {}
+
+        # key: rigid body name, value: twist at current timestep
+        source_twist = {}
+        target_twist = {}
 
         # Make the robot stand and wait a second to give it time
         CtrlInterface.stand(0, 0, 0)
         sleep(2)
 
-        # Start marching in place
-        CtrlInterface.walk(0, 0, 0)
-        sleep(2) 
+        robot_orientation = CtrlInterface.get_robot_orientation()
+        robot_position = CtrlInterface.get_robot_position()
+
+        target_pose["Robot"] = Pose(0, robot_orientation[0], robot_orientation[1], 
+                            robot_orientation[2], robot_orientation[3], 
+                            robot_position[0], robot_position[1], robot_position[2])
 
         # At frame 0  (timesep 0)
-        waist_prev_pose = Pose(df.at[(0, "Time (Seconds)")], df.at[(0, "Waist:Rotation:X")], df.at[(0, "Waist:Rotation:Y")], df.at[(0, "Waist:Rotation:Z")],
+        prev_timestep = df.at[(0, "Time (Seconds)")]
+        source_prev_pose["LFoot"] = Pose(df.at[(0, "Time (Seconds)")], df.at[(0, "LFoot:Rotation:X")], df.at[(0, "LFoot:Rotation:Y")], df.at[(0, "LFoot:Rotation:Z")],
+                                df.at[(0, "LFoot:Rotation:W")], df.at[(0, "LFoot:Position:X")], df.at[(0, "LFoot:Position:Y")], df.at[(0, "LFoot:Position:Z")])
+        source_prev_pose["RFoot"] = Pose(df.at[(0, "Time (Seconds)")], df.at[(0, "RFoot:Rotation:X")], df.at[(0, "RFoot:Rotation:Y")], df.at[(0, "RFoot:Rotation:Z")],
+                                df.at[(0, "RFoot:Rotation:W")], df.at[(0, "RFoot:Position:X")], df.at[(0, "RFoot:Position:Y")], df.at[(0, "RFoot:Position:Z")])
+        source_prev_pose["Root"] = Pose(df.at[(0, "Time (Seconds)")], df.at[(0, "Waist:Rotation:X")], df.at[(0, "Waist:Rotation:Y")], df.at[(0, "Waist:Rotation:Z")],
                                 df.at[(0, "Waist:Rotation:W")], df.at[(0, "Waist:Position:X")], df.at[(0, "Waist:Position:Y")], df.at[(0, "Waist:Position:Z")])
-    
+        
+        performance_logger = PerformanceMetrics(source_prev_pose, target_pose, source_curr_pose,target_pose, source_twist, target_twist)
 
         for index, row in df.iloc[1:].iterrows(): # At frame 1 (timestep ~0.05)
 
+            start_time = perf_counter()
+            curr_timestep = row["Time (Seconds)"]
+
             # Update current pose with this frame's data
-            waist_curr_pose = Pose(row["Time (Seconds)"], row["Waist:Rotation:X"], row["Waist:Rotation:Y"], row["Waist:Rotation:Z"], row["Waist:Rotation:W"], 
-                                row["Waist:Position:X"], row["Waist:Position:Y"], row["Waist:Position:Z"])
-    
-            # Calculate dt
-            dt = waist_curr_pose.timestep - waist_prev_pose.timestep
+            source_curr_pose["LFoot"] = Pose(row["Time (Seconds)"], row["LFoot:Rotation:X"], row["LFoot:Rotation:Y"], row["LFoot:Rotation:Z"], row["LFoot:Rotation:W"], 
+                                    row["LFoot:Position:X"], row["LFoot:Position:Y"], row["LFoot:Position:Z"])
+            source_curr_pose["RFoot"] = Pose(row["Time (Seconds)"], row["RFoot:Rotation:X"], row["RFoot:Rotation:Y"], row["RFoot:Rotation:Z"], row["RFoot:Rotation:W"], 
+                                    row["RFoot:Position:X"], row["RFoot:Position:Y"], row["RFoot:Position:Z"])
+            source_curr_pose["Root"] = Pose(row["Time (Seconds)"], row["Waist:Rotation:X"], row["Waist:Rotation:Y"], row["Waist:Rotation:Z"], row["Waist:Rotation:W"], 
+                                    row["Waist:Position:X"], row["Waist:Position:Y"], row["Waist:Position:Z"])
+            
             
             # Calculate velocities
-            dt = waist_curr_pose.timestep - waist_prev_pose.timestep
-            waist_lv = ctm.linear_velocity(waist_curr_pose, waist_prev_pose, dt)
-            waist_av = ctm.angular_velocity(waist_curr_pose, waist_prev_pose, dt)
-            
-            robot_orientation = CtrlInterface.get_robot_orientation()
-            robot_lv, robot_av = ctm.transform_cordinate_frame(waist_lv, waist_av, robot_orientation)
-            
-            print(f"\n------------------------CrossTele-----------------------")
-            print(f"Timestep: {row["Time (Seconds)"]}")
-            print(f"Human LV: {waist_lv}")
-            print(f"Human AV: {waist_av}")
+            dt = curr_timestep - prev_timestep
+            source_twist["LFoot"] = Twist(source_curr_pose["LFoot"].timestep, ctm.linear_velocity(source_curr_pose["LFoot"], source_prev_pose["LFoot"], dt),
+                                          ctm.angular_velocity(source_curr_pose["LFoot"], source_prev_pose["LFoot"], dt))
+            source_twist["RFoot"] = Twist(source_curr_pose["RFoot"].timestep, ctm.linear_velocity(source_curr_pose["RFoot"], source_prev_pose["LFoot"], dt),
+                                          ctm.angular_velocity(source_curr_pose["RFoot"], source_prev_pose["RFoot"], dt))
+            source_twist["Root"] = Twist(source_curr_pose["Root"].timestep, ctm.linear_velocity(source_curr_pose["Root"], source_prev_pose["Root"], dt),
+                                          ctm.angular_velocity(source_curr_pose["Root"], source_prev_pose["Root"], dt))
 
-            print(f"Robot LV: {robot_lv}")
-            print(f"Robot AV: {robot_av}")
-            print("-----------------------------------------------------------")
+            robot_lv, robot_av = ctm.transform_cordinate_frame(source_twist["Root"].linear_velocity, source_twist["Root"].angular_velocity, robot_orientation)
+
+            target_twist["Robot"] = Twist(curr_timestep, robot_lv, robot_av)
+
+            performance_logger.log_metrics()
+            performance_logger.print_metric_summary()
             
             # If you need to scale the values change this variable
-            scale = 1
-            CtrlInterface.walk(scale * robot_lv[0], scale * robot_lv[1], scale * robot_av[2])
+            scale = 1.0
+            CtrlInterface.walk(scale * target_twist["Robot"].linear_velocity[0], 
+                               scale * target_twist["Robot"].linear_velocity[1], 
+                               scale * target_twist["Robot"].angular_velocity[2])
+            
+            robot_orientation = CtrlInterface.get_robot_orientation()
+            robot_position = CtrlInterface.get_robot_position()
 
-            # Sleep for the duration of the time-step
-            sleep(dt)
+            target_pose["Robot"] = Pose(curr_timestep, robot_orientation[0], robot_orientation[1], 
+                                        robot_orientation[2], robot_orientation[3], 
+                                        robot_position[0], robot_position[1], robot_position[2])
+
+            # Sleep for the duration of the remaining time-step
+            end_time = perf_counter()
+            elapsed_time = end_time - start_time
+            sleep(dt - elapsed_time)
+
+            # Update timestep
+            prev_timestep = curr_timestep
 
             # Update previous pose for next iteration
-            waist_prev_pose = copy.deepcopy(waist_curr_pose)
+            source_prev_pose["LFoot"] = copy.deepcopy(source_curr_pose["LFoot"])
+            source_prev_pose["RFoot"] = copy.deepcopy(source_curr_pose["RFoot"])
+            source_prev_pose["Root"] = copy.deepcopy(source_curr_pose["Root"])
 
         CtrlInterface.hard_stop()
 
