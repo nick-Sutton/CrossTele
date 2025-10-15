@@ -12,6 +12,12 @@ Meeting Notes
     -Example Command from CrossTele directory
         python3 teleop/src/teleop.py --input_mode=offline --io_mode=mujoco --input_file=./training/dataset/FormattedData/Walk_forward_000.csv
 
+    -Difference in axis and angle
+    - Use quats
+    - we only care sbout ptich and yaw
+    - three plots (x,y of base) z postion of each foot frame, gait phase (for feature reduction) more plots
+    -Consider more markers for foot(heel to toe motion)
+
 
 Tasks:
     Get Some performance metrics.
@@ -40,3 +46,10 @@ Logs
         -metadata.yaml
         -metrics.csv
         -summary.yaml
+
+
+-Foot Velocities
+-Height above ground plane
+-Acceleration patterns
+-Phase in Gait cycle
+-Historical Contact pattern (Maybe remeber the nature of last foot contact)

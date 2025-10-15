@@ -1,7 +1,7 @@
 natnet_config:
-    connection_type: "Unicast" # Unicast / Multicast
-    server_address: "198.17.0.120"
-    local_address: "198.17.0.48"
+    use_multicast: False # Unicast / Multicast
+    server_address: "169.254.128.60"
+    local_address: "10.154.55.236"
     multicast_address: "239.255.42.99"
     command_port: 1510
     data_port: 1511

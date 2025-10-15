@@ -4,7 +4,7 @@ import scipy.spatial.transform as st
 def linear_velocity(current_pose, previous_pose, dt):
     """Calculate linear velocity from position change"""
 
-    unitScale = 1000.0
+    unitScale = 1.0
 
     dx = (current_pose.positionX - previous_pose.positionX) / unitScale
     dy = (current_pose.positionY - previous_pose.positionY) / unitScale  
@@ -94,7 +94,7 @@ def apply_coordinate_transformation(df):
             orig_z = df[pos_z_col].values.copy()
             
             # Apply transformation: [x, y, z] -> [-y, -x, z]
-            df_transformed[pos_x_col] = -orig_y  # New X = -original Y
+            df_transformed[pos_x_col] = orig_y  # New X = -original Y
             df_transformed[pos_y_col] = -orig_x  # New Y = -original X
             df_transformed[pos_z_col] = orig_z   # New Z = original Z
         
@@ -118,3 +118,6 @@ def apply_coordinate_transformation(df):
             df_transformed[rot_w_col] = orig_qw   # qw unchanged
     
     return df_transformed
+
+def is_peak(signal_history):
+    pass

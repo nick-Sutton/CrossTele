@@ -1,5 +1,6 @@
 import csv
 import os
+import yaml
 import numpy as np
 import argparse as arg
 
@@ -23,4 +24,8 @@ class IOParser():
         pass
 
     def parse_natnet_config():
-        pass
+        # Read and parse the YAML file
+        with open('./../../../config/natnet_config.yaml', 'r') as file:
+            config = yaml.safe_load(file)
+
+        return config['natnet_config']

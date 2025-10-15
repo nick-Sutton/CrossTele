@@ -1,6 +1,8 @@
 from pose.pose import Pose
 from typing import Dict, Tuple, Optional
 import scipy.spatial.transform as st
+import matplotlib.pyplot as plt
+import pandas as pd
 import numpy as np
 import csv
 import yaml
@@ -10,20 +12,23 @@ import time
 
 class PerformanceMetrics():
     def __init__(self, source_starting_pose=None, target_starting_pose=None, 
-                 source_pose = None, target_pose = None, source_twist = None, target_twist = None):
-        self.log_dir = "./teleop/log"
+                 human = None, target_pose = None, source_twist = None, target_twist = None):
+        self.logs_dir = "./teleop/log/"
         self.name = "log"
         self.dt = 0.004
-        self.unit_scale = 1000.0
+        self.unit_scale = 1.0
         self.start_time = time.time()
         self.timestep_count = 0
 
-        os.makedirs(self.log_dir, exist_ok=True)
+        os.makedirs(self.logs_dir, exist_ok=True)
         # Generate unique filename with timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
         self.base_filename = f"{self.name}_{timestamp}"
-        self.csv_path = os.path.join(self.log_dir, f"{self.base_filename}.csv")
-        self.yaml_path = os.path.join(self.log_dir, f"{self.base_filename}_metadata.yaml")
+
+        self.curr_run_dir = os.path.join(self.logs_dir, self.base_filename)
+        os.makedirs(self.curr_run_dir, exist_ok=True)
+        self.csv_path = os.path.join(self.curr_run_dir, f"{self.base_filename}.csv")
+        self.yaml_path = os.path.join(self.curr_run_dir, f"{self.base_filename}_metadata.yaml")
 
         # Initialize CSV file with headers
         self._init_csv_file()
@@ -32,7 +37,7 @@ class PerformanceMetrics():
         self.metadata = {
             'experiment_name': self.name,
             'start_time': datetime.now().isoformat(),
-            'log_directory': self.log_dir,
+            'log_directory': self.curr_run_dir,
             'csv_filename': os.path.basename(self.csv_path),
             'system_info': {
                 'platform': os.uname().sysname if hasattr(os, 'uname') else 'Unknown',
@@ -48,7 +53,7 @@ class PerformanceMetrics():
                                                   target_starting_pose["Robot"].positionY, 
                                                   target_starting_pose["Robot"].positionZ])
 
-        self.source_pose = source_pose
+        self.human = human
         self.target_pose = target_pose
         self.source_twist = source_twist
         self.target_twist = target_twist
@@ -57,6 +62,13 @@ class PerformanceMetrics():
         self.total_position_metrics = {}
         self.total_orientation_metrics = {}
         self.total_linear_velocity_metrics = {}
+        self.total_angular_velocity_metrics = {}
+        self.total_source_position = {}
+        self.total_lfoot_position = {}
+        self.total_rfoot_position = {}
+        self.total_lfoot_lv = {}
+        self.total_rfoot_lv = {}
+        self.gait_phase = {}
 
     def _init_csv_file(self):
         """Initialize CSV file with headers"""
@@ -83,9 +95,9 @@ class PerformanceMetrics():
             writer.writeheader()
 
     def position_metrics(self) -> Dict:
-        curr_source_position = np.array([self.source_pose["Root"].positionX / self.unit_scale, 
-                                         self.source_pose["Root"].positionY / self.unit_scale, 
-                                         self.source_pose["Root"].positionZ / self.unit_scale])
+        curr_source_position = np.array([self.human.curr_pose["Root"].positionX / self.unit_scale, 
+                                         self.human.curr_pose["Root"].positionY / self.unit_scale, 
+                                         self.human.curr_pose["Root"].positionZ / self.unit_scale])
         
         curr_target_position = np.array([self.target_pose["Robot"].positionX, 
                                          self.target_pose["Robot"].positionY, 
@@ -98,7 +110,7 @@ class PerformanceMetrics():
         pos_error = np.linalg.norm(pos_diff) # Euclidean distance
 
         metrics = {
-            'timestep': self.source_pose["Root"].timestep,
+            'timestep': self.human.curr_pose["Root"].timestep,
             'position_error': pos_error,  # Euclidean distance
             'x_error': pos_diff[0],       # Error in X axis
             'y_error': pos_diff[1],       # Error in Y axis  
@@ -107,17 +119,26 @@ class PerformanceMetrics():
             'target_displacement': target_displacement
         }
 
-        self.total_position_metrics[self.source_pose["Root"].timestep] = metrics
+        self.total_position_metrics[self.human.curr_pose["Root"].timestep] = metrics
+        self.total_source_position[self.human.curr_pose["Root"].timestep] = curr_source_position
+
+        self.total_lfoot_position[self.human.curr_pose["LFoot"].timestep] = np.array([self.human.curr_pose["LFoot"].positionX / self.unit_scale, 
+                                                                                   self.human.curr_pose["LFoot"].positionY / self.unit_scale, 
+                                                                                   self.human.curr_pose["LFoot"].positionZ / self.unit_scale])
+        
+        self.total_rfoot_position[self.human.curr_pose["RFoot"].timestep] = np.array([self.human.curr_pose["RFoot"].positionX / self.unit_scale, 
+                                                                                   self.human.curr_pose["RFoot"].positionY / self.unit_scale, 
+                                                                                   self.human.curr_pose["RFoot"].positionZ / self.unit_scale])
 
         return metrics
     
     def orientation_metrics(self) -> Dict:
         # Source orientation as a quaturion
         source_q = st.Rotation.from_quat([
-            self.source_pose["Root"].orientationX,
-            self.source_pose["Root"].orientationY,
-            self.source_pose["Root"].orientationZ,
-            self.source_pose["Root"].orientationW
+            self.human.curr_twist["Root"].orientationX,
+            self.human.curr_twist["Root"].orientationY,
+            self.human.curr_twist["Root"].orientationZ,
+            self.human.curr_twist["Root"].orientationW
         ])
         
         # target orientation as a quaturion
@@ -143,7 +164,7 @@ class PerformanceMetrics():
             'angular_error_deg': angle_error_deg
         }
 
-        self.total_orientation_metrics[self.source_pose["Root"].timestep] = metrics
+        self.total_orientation_metrics[self.human.curr_twist["Root"].timestep] = metrics
 
         return metrics
     
@@ -156,9 +177,15 @@ class PerformanceMetrics():
             'linear_velocity_error': vel_error,
             'x_vel_error': vel_diff[0],
             'y_vel_error': vel_diff[1],
-            'z_vel_error': vel_diff[2]
+            'z_vel_error': vel_diff[2],
+            'source_linear_velocity': self.source_twist["Root"].linear_velocity,
+            'target_linear_velocity': self.target_twist["Robot"].linear_velocity
         }
-        
+
+        self.total_linear_velocity_metrics[self.source_twist["Root"].timestep] = metrics
+        self.total_lfoot_lv[self.source_twist["LFoot"].timestep] = self.source_twist["LFoot"].linear_velocity
+        self.total_rfoot_lv[self.source_twist["RFoot"].timestep] = self.source_twist["RFoot"].linear_velocity
+        self.gait_phase[self.source_twist["RFoot"].timestep] = self.human.curr_gait_phase
         return metrics
 
     def angular_velocity_metrics(self):
@@ -171,8 +198,12 @@ class PerformanceMetrics():
             'rx_vel_error': a_vel_diff[0],
             'ry_vel_error': a_vel_diff[1],
             'rz_vel_error': a_vel_diff[2],
+            'source_angular_velocity': self.source_twist["Root"].angular_velocity,
+            'target_angular_velocity': self.target_twist["Robot"].angular_velocity
         }
         
+        self.total_angular_velocity_metrics[self.source_twist["Root"].timestep] = metrics
+
         return metrics
 
     def temporal_accuracy(self):
@@ -276,6 +307,406 @@ class PerformanceMetrics():
         
         print(f"\n{'='*50}")
 
+    def plot_position_metrics(self):
+        """
+        Plot position metrics over time for quadrupedal robot and human operator comparison.
+        
+        Args:
+            total_position_metrics: Dictionary with timestep keys and metrics values
+            save_path: Optional path to save the plot
+        """
+        # Extract data from metrics dictionary
+        timesteps = []
+        position_errors = []
+        x_errors = []
+        y_errors = []
+        z_errors = []
+        source_displacements = []
+        target_displacements = []
+        
+        # Sort by timestep to ensure proper time ordering
+        sorted_metrics = sorted(self.total_position_metrics.items(), key=lambda x: x[0])
+        
+        for timestep, metrics in sorted_metrics:
+            timesteps.append(timestep)
+            position_errors.append(metrics['position_error'])
+            x_errors.append(metrics['x_error'])
+            y_errors.append(metrics['y_error'])
+            z_errors.append(metrics['z_error'])
+            source_displacements.append(metrics['source_displacement'])
+            target_displacements.append(metrics['target_displacement'])
+        
+        # Convert to numpy arrays for easier manipulation
+        timesteps = np.array(timesteps)
+        source_displacements = np.array(source_displacements)
+        target_displacements = np.array(target_displacements)
+        
+        # Create comprehensive plot
+        fig = plt.figure(figsize=(15, 12))
+        
+        # Plot 1: Overall position error over time
+        plt.subplot(3, 2, 1)
+        plt.plot(timesteps, position_errors, 'r-', linewidth=2, label='Position Error')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Position Error (m)')
+        plt.title('Total Position Error Over Time')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        
+        # Plot 2: Individual axis errors
+        plt.subplot(3, 2, 2)
+        plt.plot(timesteps, x_errors, 'r-', label='X Error', alpha=0.8)
+        plt.plot(timesteps, y_errors, 'g-', label='Y Error', alpha=0.8)
+        plt.plot(timesteps, z_errors, 'b-', label='Z Error', alpha=0.8)
+        plt.xlabel('Time (s)')
+        plt.ylabel('Position Error (m)')
+        plt.title('Position Error by Axis')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        
+        # Plot 3: Source (Human) displacement
+        plt.subplot(3, 2, 3)
+        plt.plot(timesteps, source_displacements[:, 0], 'r-', label='X', alpha=0.8)
+        plt.plot(timesteps, source_displacements[:, 1], 'g-', label='Y', alpha=0.8)
+        plt.plot(timesteps, source_displacements[:, 2], 'b-', label='Z', alpha=0.8)
+        plt.xlabel('Time (s)')
+        plt.ylabel('Displacement (m)')
+        plt.title('Source (Human) Displacement')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        
+        # Plot 4: Target (Robot) displacement
+        plt.subplot(3, 2, 4)
+        plt.plot(timesteps, target_displacements[:, 0], 'r-', label='X', alpha=0.8)
+        plt.plot(timesteps, target_displacements[:, 1], 'g-', label='Y', alpha=0.8)
+        plt.plot(timesteps, target_displacements[:, 2], 'b-', label='Z', alpha=0.8)
+        plt.xlabel('Time (s)')
+        plt.ylabel('Displacement (m)')
+        plt.title('Target (Robot) Displacement')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        
+        # Plot 5: 3D trajectory comparison
+        ax = plt.subplot(3, 2, 5, projection='3d')
+        ax.plot(source_displacements[:, 0], source_displacements[:, 1], 
+                source_displacements[:, 2], 'r-', label='Human', linewidth=2)
+        ax.plot(target_displacements[:, 0], target_displacements[:, 1], 
+                target_displacements[:, 2], 'b-', label='Robot', linewidth=2)
+        ax.set_xlabel('X Displacement (m)')
+        ax.set_ylabel('Y Displacement (m)')
+        ax.set_zlabel('Z Displacement (m)')
+        ax.set_title('3D Trajectory Comparison')
+        ax.legend()
+        
+        plt.tight_layout()
+        
+        plt.savefig(os.path.join(self.curr_run_dir, "position_plots"), dpi=300, bbox_inches='tight')
 
+    def plot_linear_velocity_metrics(self):
+        # Extract data from metrics dictionary
+        timesteps = []
+        linear_velocity_error = []
+        x_vel_error = []
+        y_vel_error = []
+        z_vel_error = []
+        source_lv = []
+        target_lv = []
+        
+        # Sort by timestep to ensure proper time ordering
+        sorted_metrics = sorted(self.total_linear_velocity_metrics.items(), key=lambda x: x[0])
+        
+        for timestep, metrics in sorted_metrics:
+            timesteps.append(timestep)
+            linear_velocity_error.append(metrics['linear_velocity_error'])
+            x_vel_error.append(metrics['x_vel_error'])
+            y_vel_error.append(metrics['y_vel_error'])
+            z_vel_error.append(metrics['z_vel_error'])
+            source_lv.append(metrics['source_linear_velocity'])
+            target_lv.append(metrics['target_linear_velocity'])
+        
+        # Convert to numpy arrays for easier manipulation
+        timesteps = np.array(timesteps)
+        source_lv = np.array(source_lv)
+        target_lv = np.array(target_lv)
+        
+        # Create comprehensive plot
+        fig = plt.figure(figsize=(15, 12))
+        
+        # Plot 1: Overall position error over time
+        plt.subplot(3, 2, 1)
+        plt.plot(timesteps, linear_velocity_error, 'r-', linewidth=2, label='Linear Velocity Error')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Linear Velocity Error (m/s)')
+        plt.title('Total Linear Velocity Error Over Time')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+
+        # Plot 2: Source (Human) LV
+        plt.subplot(3, 2, 2)
+        plt.plot(timesteps, source_lv[:, 0], 'r-', label='X', alpha=0.8)
+        plt.plot(timesteps, source_lv[:, 1], 'g-', label='Y', alpha=0.8)
+        plt.plot(timesteps, source_lv[:, 2], 'b-', label='Z', alpha=0.8)
+        plt.xlabel('Time (s)')
+        plt.ylabel('Linear Velocity (m/s)')
+        plt.title('Source (Human) Linear Velocity')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        
+        # Plot 3: Target (Robot) LV
+        plt.subplot(3, 2, 3)
+        plt.plot(timesteps, target_lv[:, 0], 'r-', label='X', alpha=0.8)
+        plt.plot(timesteps, target_lv[:, 1], 'g-', label='Y', alpha=0.8)
+        plt.plot(timesteps, target_lv[:, 2], 'b-', label='Z', alpha=0.8)
+        plt.xlabel('Time (s)')
+        plt.ylabel('Linear Velocity (m/s)')
+        plt.title('Target (Robot) Linear Velocity')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        
+        # Plot 4: X-Axis error
+        plt.subplot(3, 2, 4)
+        plt.plot(timesteps, x_vel_error, 'r-', label='X Error', alpha=0.8)
+        plt.xlabel('Time (s)')
+        plt.ylabel('Linear Velocity Error (m/s)')
+        plt.title('Linear Velocity Error X-Axis')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+
+        # Plot 5: Y-Axis error
+        plt.subplot(3, 2, 5)
+        plt.plot(timesteps, y_vel_error, 'g-', label='Y Error', alpha=0.8)
+        plt.xlabel('Time (s)')
+        plt.ylabel('Linear Velocity Error (m/s)')
+        plt.title('Linear Velocity Error Y-Axis')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+
+        # Plot 6: Z-Axis error
+        plt.subplot(3, 2, 6)
+        plt.plot(timesteps, z_vel_error, 'b-', label='Z Error', alpha=0.8)
+        plt.xlabel('Time (s)')
+        plt.ylabel('Linear Velocity Error (m/s)')
+        plt.title('Linear Velocity Error Z-Axis')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        
+        plt.tight_layout()
+        
+        plt.savefig(os.path.join(self.curr_run_dir, "linear_vel_plots"), dpi=300, bbox_inches='tight')
+
+    def plot_angular_velocity_metrics(self):
+        # Extract data from metrics dictionary
+        timesteps = []
+        angular_velocity_error = []
+        rx_vel_error = []
+        ry_vel_error = []
+        rz_vel_error = []
+        source_av = []
+        target_av = []
+        
+        # Sort by timestep to ensure proper time ordering
+        sorted_metrics = sorted(self.total_angular_velocity_metrics.items(), key=lambda x: x[0])
+        
+        for timestep, metrics in sorted_metrics:
+            timesteps.append(timestep)
+            angular_velocity_error.append(metrics['angular_velocity_error'])
+            rx_vel_error.append(metrics['rx_vel_error'])
+            ry_vel_error.append(metrics['ry_vel_error'])
+            rz_vel_error.append(metrics['rz_vel_error'])
+            source_av.append(metrics['source_angular_velocity'])
+            target_av.append(metrics['target_angular_velocity'])
+        
+        # Convert to numpy arrays for easier manipulation
+        timesteps = np.array(timesteps)
+        source_av = np.array(source_av)
+        target_av = np.array(target_av)
+        
+        # Create comprehensive plot
+        fig = plt.figure(figsize=(15, 12))
+        
+        # Plot 1: Overall position error over time
+        plt.subplot(3, 2, 1)
+        plt.plot(timesteps, angular_velocity_error, 'r-', linewidth=2, label='Angular Velocity Error')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Angular Velocity Error (m/s)')
+        plt.title('Total Angular Velocity Error Over Time')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+
+        # Plot 3: Source (Human) AV
+        plt.subplot(3, 2, 2)
+        plt.plot(timesteps, source_av[:, 0], 'r-', label='X', alpha=0.8)
+        plt.plot(timesteps, source_av[:, 1], 'g-', label='Y', alpha=0.8)
+        plt.plot(timesteps, source_av[:, 2], 'b-', label='Z', alpha=0.8)
+        plt.xlabel('Time (s)')
+        plt.ylabel('Angular Velocity (m/s)')
+        plt.title('Source (Human) Angular Velocity')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        
+        # Plot 4: Target (Robot) AV
+        plt.subplot(3, 2, 3)
+        plt.plot(timesteps, target_av[:, 0], 'r-', label='X', alpha=0.8)
+        plt.plot(timesteps, target_av[:, 1], 'g-', label='Y', alpha=0.8)
+        plt.plot(timesteps, target_av[:, 2], 'b-', label='Z', alpha=0.8)
+        plt.xlabel('Time (s)')
+        plt.ylabel('Angular Velocity (m/s)')
+        plt.title('Target (Robot) Angular Velocity')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        
+        # Plot 2: X-Axis error
+        plt.subplot(3, 2, 4)
+        plt.plot(timesteps, rx_vel_error, 'r-', label='X Error', alpha=0.8)
+        plt.xlabel('Time (s)')
+        plt.ylabel('Angular Velocity Error (m/s)')
+        plt.title('Angular Velocity Error X-Axis')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+
+        # Plot 3: Y-Axis Error
+        plt.subplot(3, 2, 5)
+        plt.plot(timesteps, ry_vel_error, 'g-', label='Y Error', alpha=0.8)
+        plt.xlabel('Time (s)')
+        plt.ylabel('Angular Velocity Error (m/s)')
+        plt.title('Angular Velocity Error Y-Axis')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+
+        # Plot 4: Z-Axis Error
+        plt.subplot(3, 2, 6)
+        plt.plot(timesteps, ry_vel_error, 'b-', label='Z Error', alpha=0.8)
+        plt.xlabel('Time (s)')
+        plt.ylabel('Angular Velocity Error (m/s)')
+        plt.title('Angular Velocity Error Z-Axis')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        
+        plt.tight_layout()
+        
+        plt.savefig(os.path.join(self.curr_run_dir, "angular_vel_plots"), dpi=300, bbox_inches='tight')
+
+    def plot_gait_features(self):
+
+        # Create comprehensive plot
+        fig = plt.figure(figsize=(15, 12))
+        
+        timesteps = []
+        base_x_positions = []
+        base_y_positions = []
+        l_foot_z_positions = []
+        r_foot_z_positions = []
+        l_foot_lv = []
+        r_foot_lv = []
+        gait_phase = []
 
         
+        # Sort by timestep to ensure proper time ordering
+        sorted_base_positions = sorted(self.total_source_position.items(), key=lambda x: x[0])
+        for timestep, position in sorted_base_positions:
+            timesteps.append(timestep)
+            base_x_positions.append(position[0])  # base X coordinate
+            base_y_positions.append(position[1])  # base Y coordinate
+
+        for _, lv in self.total_lfoot_lv.items():
+            l_foot_lv.append(lv)
+
+        for _, lv in self.total_rfoot_lv.items():
+            r_foot_lv.append(lv)
+
+        for _, position in self.total_rfoot_position.items():
+            r_foot_z_positions.append(position[2])
+
+        for _, position in self.total_lfoot_position.items():
+            l_foot_z_positions.append(position[2])
+
+        for _, gp in self.gait_phase.items():
+            gait_phase.append(gp)
+        
+        # Convert to numpy arrays for easier manipulation
+        timesteps = np.array(timesteps)
+        base_x_positions = np.array(base_x_positions)
+        base_y_positions = np.array(base_y_positions)
+        l_foot_z_positions = np.array(l_foot_z_positions)
+        r_foot_z_positions = np.array(r_foot_z_positions)
+        l_foot_lv = np.array(l_foot_lv)
+        r_foot_lv = np.array(r_foot_lv)
+        gait_phase = np.array(gait_phase)
+        
+        # Plot 1: X and Y position of Base
+        plt.subplot(4, 2, 1)
+        plt.plot(base_x_positions, base_y_positions, 'r-', linewidth=2, label='Time (s)')
+        plt.xlabel('Base Position (X)')
+        plt.ylabel('Base Position (Y)')
+        plt.title('Base Position(X, Y)')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+
+        # Plot 2: Left and right foot z position
+        plt.subplot(4, 2, 2)
+        plt.plot(timesteps, l_foot_z_positions, 'g-', linewidth=2, label='Left Z Position')
+        plt.plot(timesteps, r_foot_z_positions, 'b-', linewidth=2, label='Right Z Position')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Z Position (m)')
+        plt.title('Combined Foot Z positions')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+
+        # Plot 3: Left foot z position
+        plt.subplot(4, 2, 3)
+        plt.plot(timesteps, l_foot_z_positions, 'g-', linewidth=2, label='Z Position')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Z Position (m)')
+        plt.title('Left Foot Z Position')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+
+        #Plot 4: Right foot z position
+        plt.subplot(4, 2, 4)
+        plt.plot(timesteps, r_foot_z_positions, 'b-', linewidth=2, label='Z Position')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Z Position (m)')
+        plt.title('Right Foot Z Position')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+
+        #Plot 5: Left foot velocities
+        plt.subplot(4, 2, 5)
+        plt.plot(timesteps, l_foot_lv[:, 0], 'r-', label='X', alpha=0.8)
+        plt.plot(timesteps, l_foot_lv[:, 1], 'g-', label='Y', alpha=0.8)
+        plt.plot(timesteps, l_foot_lv[:, 2], 'b-', label='Z', alpha=0.8)
+        plt.xlabel('Time (s)')
+        plt.ylabel('Linear Velocity (m/s)')
+        plt.title('Left Foot Linear Velocity')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+
+        #Plot 6 Right foot Velocities
+        plt.subplot(4, 2, 6)
+        plt.plot(timesteps, r_foot_lv[:, 0], 'r-', label='X', alpha=0.8)
+        plt.plot(timesteps, r_foot_lv[:, 1], 'g-', label='Y', alpha=0.8)
+        plt.plot(timesteps, r_foot_lv[:, 2], 'b-', label='Z', alpha=0.8)
+        plt.xlabel('Time (s)')
+        plt.ylabel('Linear Velocity (m/s)')
+        plt.title('Right Foot Linear Velocity')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+
+        #Plot 7 Right foot Velocities
+        #plt.subplot(4, 2, 7)
+        #plt.plot(timesteps, gait_phase, 'r-', alpha=0.8)
+        #plt.xlabel('Time (s)')
+        #plt.ylabel('Gait Phase')
+        #plt.title('Gait Phase')
+        #plt.grid(True, alpha=0.3)
+        #plt.legend()
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.curr_run_dir, "gait_plots"), dpi=300, bbox_inches='tight')
+
+    def plot_metrics(self):
+        self.plot_position_metrics()
+        #self.plot_orientation_metrics()
+        self.plot_linear_velocity_metrics()
+        self.plot_angular_velocity_metrics()
+        self.plot_gait_features()
