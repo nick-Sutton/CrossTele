@@ -1,3 +1,5 @@
+import glob
+import os
 import torch
 import torch.nn as nn
 import numpy as np
@@ -12,31 +14,45 @@ class GaitDataPreprocessor:
     def __init__(self):
         self.scaler = StandardScaler()
         self.label_encoder = LabelEncoder()
-        self.feature_names = None
+        self.support_encoder = LabelEncoder()
+        self.original_feature_names = None
+        self.processed_feature_names = None
+        self.is_fitted = False
+        self.all_possible_labels = None  # Track all possible labels
         
-    def prepare_features(self, df, feature_names):
-        """Prepare features by handling categorical variables and scaling"""
-        # Create copy of features
-        features = df[feature_names].copy()
+    def prepare_features(self, df, feature_names, is_training=False):
+        """Prepare features with proper support_type encoding"""
+        available_features = [f for f in feature_names if f in df.columns]
+        features = df[available_features].copy()
         
-        # Handle support_type (one-hot encode if categorical)
+        # Handle support_type text encoding
         if 'support_type' in features.columns:
-            if features['support_type'].dtype == 'object' or features['support_type'].nunique() < 10:
-                support_dummies = pd.get_dummies(features['support_type'], prefix='support')
-                features = pd.concat([features.drop('support_type', axis=1), support_dummies], axis=1)
+            if features['support_type'].dtype == 'object':
+                if is_training or not self.is_fitted:
+                    features['support_type_encoded'] = self.support_encoder.fit_transform(features['support_type'])
+                else:
+                    # For unseen support types, use a default value
+                    try:
+                        features['support_type_encoded'] = self.support_encoder.transform(features['support_type'])
+                    except ValueError:
+                        features['support_type_encoded'] = 0  # Default to first category
+                
+                features = features.drop('support_type', axis=1)
         
-        self.feature_names = [col for col in features.columns]
+        self.processed_feature_names = [col for col in features.columns]
         return features
     
     def create_sequences(self, features, targets, sequence_length=60, stride=10):
-        """Create sliding window sequences from time series data"""
+        """Create sequences that maintain temporal continuity within takes"""
         sequences = []
         sequence_labels = []
         
         for i in range(0, len(features) - sequence_length + 1, stride):
             sequence = features.iloc[i:i+sequence_length].values
-            # Use the label from the last frame of the sequence
-            label = targets.iloc[i+sequence_length-1]
+            
+            # Get the most common label in the sequence
+            sequence_labels_in_window = targets.iloc[i:i+sequence_length]
+            label = sequence_labels_in_window.mode()[0]
             
             sequences.append(sequence)
             sequence_labels.append(label)
@@ -44,32 +60,81 @@ class GaitDataPreprocessor:
         return np.array(sequences), np.array(sequence_labels)
     
     def fit_transform(self, df, feature_names, sequence_length=60, stride=10):
-        """Complete preprocessing pipeline"""
-        # Prepare features
-        features = self.prepare_features(df, feature_names)
+        """Fit on training data - but collect ALL labels first"""
+        if not self.is_fitted:
+            # First time - initialize
+            self.original_feature_names = feature_names
+            self.is_fitted = True
+            
+            # For the first file, just store the labels but don't fit yet
+            self.all_possible_labels = set(df['gait_type'].unique())
+            print(f"Initial labels collected: {self.all_possible_labels}")
+            
+            # Process features but don't fit label encoder yet
+            features = self.prepare_features(df, feature_names, is_training=True)
+            scaled_features = self.scaler.fit_transform(features)
+            scaled_features_df = pd.DataFrame(scaled_features, columns=self.processed_feature_names)
+            
+            # Store the sequences for later processing
+            self.pending_sequences = (scaled_features_df, df['gait_type'])
+            
+            return np.array([]), np.array([])  # Return empty for now
+            
+        else:
+            # Subsequent files - collect more labels
+            self.all_possible_labels.update(df['gait_type'].unique())
+            print(f"Updated labels: {self.all_possible_labels}")
+            
+            # Process this file
+            features = self.prepare_features(df, feature_names, is_training=False)
+            scaled_features = self.scaler.transform(features)  # Use fitted scaler
+            scaled_features_df = pd.DataFrame(scaled_features, columns=self.processed_feature_names)
+            
+            # Store sequences
+            self.pending_sequences = (scaled_features_df, df['gait_type'])
+            
+            return np.array([]), np.array([])
+    
+    def finalize_fit(self):
+        """Finalize fitting after seeing all training data"""
+        if not hasattr(self, 'pending_sequences'):
+            return np.array([]), np.array([])
+            
+        # Now fit the label encoder with ALL possible labels
+        all_labels_list = sorted(list(self.all_possible_labels))
+        self.label_encoder.fit(all_labels_list)
+        print(f"Final label encoder classes: {self.label_encoder.classes_}")
         
-        # Scale features
-        scaled_features = self.scaler.fit_transform(features)
-        scaled_features_df = pd.DataFrame(scaled_features, columns=self.feature_names)
-        
-        # Encode labels
-        encoded_labels = self.label_encoder.fit_transform(df['gait_type'])
-        encoded_labels_series = pd.Series(encoded_labels, index=df.index)
+        # Process all stored sequences
+        scaled_features_df, gait_series = self.pending_sequences
+        encoded_labels = self.label_encoder.transform(gait_series)
+        encoded_labels_series = pd.Series(encoded_labels, index=gait_series.index)
         
         # Create sequences
         X_sequences, y_sequences = self.create_sequences(
-            scaled_features_df, encoded_labels_series, sequence_length, stride
+            scaled_features_df, encoded_labels_series, sequence_length=60, stride=10
         )
         
         return X_sequences, y_sequences
     
     def transform(self, df, sequence_length=60, stride=10):
-        """Transform new data using fitted preprocessor"""
-        features = self.prepare_features(df, self.feature_names)
-        scaled_features = self.scaler.transform(features)
-        scaled_features_df = pd.DataFrame(scaled_features, columns=self.feature_names)
+        """Transform new data using fitted preprocessors"""
+        if not self.is_fitted:
+            raise ValueError("Preprocessor must be fitted before transform")
         
-        encoded_labels = self.label_encoder.transform(df['gait_type'])
+        features = self.prepare_features(df, self.original_feature_names, is_training=False)
+        scaled_features = self.scaler.transform(features)
+        scaled_features_df = pd.DataFrame(scaled_features, columns=self.processed_feature_names)
+        
+        # Handle unseen labels in validation data
+        try:
+            encoded_labels = self.label_encoder.transform(df['gait_type'])
+        except ValueError as e:
+            print(f"Warning: Unseen labels in validation data: {e}")
+            # Map unseen labels to a default class (e.g., the most common one)
+            default_label = self.label_encoder.transform([self.label_encoder.classes_[0]])[0]
+            encoded_labels = np.full(len(df), default_label)
+        
         encoded_labels_series = pd.Series(encoded_labels, index=df.index)
         
         X_sequences, y_sequences = self.create_sequences(
@@ -196,48 +261,85 @@ def setup_device():
         print("⚠️ Using CPU - training will be slower")
     return device
 
-def train_model(df, feature_names):
+def train_model(data_dir, feature_names, train_ratio=0.8):
     # Setup device
     device = setup_device()
     
-    # Debug data first
-    #X_train, y_train = debug_data_pipeline(df, feature_names)
+    # Get all take files
+    take_files = glob.glob(os.path.join(data_dir, "*.csv"))
+    print(f"Found {len(take_files)} take files")
     
-    # 1. Initialize preprocessor
+    # Shuffle and split take files
+    np.random.shuffle(take_files)
+    split_idx = int(len(take_files) * 0.8)
+    train_files = take_files[:split_idx]
+    val_files = take_files[split_idx:]
+    
+    print(f"Training takes: {len(train_files)}")
+    print(f"Validation takes: {len(val_files)}")
+    
+    # Initialize preprocessor
     preprocessor = GaitDataPreprocessor()
     
-    # 2. Better data splitting (shuffle first)
-    df_shuffled = df.sample(frac=1, random_state=42).reset_index(drop=True)
-    split_idx = int(0.8 * len(df_shuffled))
-    train_df = df_shuffled.iloc[:split_idx]
-    val_df = df_shuffled.iloc[split_idx:]
+    # 1. FIRST PASS: Process all training files to collect ALL labels
+    print("First pass: Collecting all gait labels...")
+    all_train_sequences = []
+    all_train_labels = []
     
-    # 3. Preprocess data
-    X_train, y_train = preprocessor.fit_transform(train_df, feature_names, sequence_length=60, stride=10)
-    X_val, y_val = preprocessor.transform(val_df, sequence_length=60, stride=10)
+    for i, train_file in enumerate(train_files):
+        print(f"  Processing take {i+1}/{len(train_files)}: {os.path.basename(train_file)}")
+        df = pd.read_csv(train_file)
+        
+        # This collects labels but doesn't finalize encoding yet
+        X_take, y_take = preprocessor.fit_transform(df, feature_names)
+        
+        # Store the data for final processing
+        if i == len(train_files) - 1:  # Last file, finalize
+            X_final, y_final = preprocessor.finalize_fit()
+            if len(X_final) > 0:
+                all_train_sequences.append(X_final)
+                all_train_labels.append(y_final)
     
-    print(f"Training sequences: {X_train.shape}")
-    print(f"Validation sequences: {X_val.shape}")
+    # 2. SECOND PASS: Now process validation files with finalized encoder
+    print("Processing validation takes...")
+    all_val_sequences = []
+    all_val_labels = []
     
-    # 4. Convert to tensors
+    for i, val_file in enumerate(val_files):
+        print(f"  Validation take {i+1}/{len(val_files)}: {os.path.basename(val_file)}")
+        df = pd.read_csv(val_file)
+        X_take, y_take = preprocessor.transform(df, sequence_length=60, stride=10)
+        all_val_sequences.append(X_take)
+        all_val_labels.append(y_take)
+    
+    # Combine all sequences
+    X_train = np.vstack(all_train_sequences) if all_train_sequences else np.array([])
+    y_train = np.hstack(all_train_labels) if all_train_labels else np.array([])
+    X_val = np.vstack(all_val_sequences) 
+    y_val = np.hstack(all_val_labels)
+    
+    print(f"Final training sequences: {X_train.shape}")
+    print(f"Final validation sequences: {X_val.shape}")
+
+    
+    # 7. Convert to tensors and train (same as before)
     X_train_tensor = torch.FloatTensor(X_train).to(device)
     y_train_tensor = torch.LongTensor(y_train).to(device)
     X_val_tensor = torch.FloatTensor(X_val).to(device)
     y_val_tensor = torch.LongTensor(y_val).to(device)
     
-    # 5. Create dataloaders
     train_loader = DataLoader(TensorDataset(X_train_tensor, y_train_tensor), 
                              batch_size=32, shuffle=True)
     val_loader = DataLoader(TensorDataset(X_val_tensor, y_val_tensor), 
                            batch_size=32, shuffle=False)
     
-    # 6. Simpler model architecture
+    # 8. Initialize and train model
     model = GaitTCN(
         num_features=X_train.shape[2],
         num_classes=len(preprocessor.label_encoder.classes_),
-        num_channels=[32, 64, 128],  # Smaller architecture
-        kernel_size=3,  # Smaller kernel
-        dropout=0.1  # Less dropout
+        num_channels=[32, 64, 128],
+        kernel_size=3,
+        dropout=0.1
     ).to(device)
     
     # 7. More conservative training setup
@@ -246,7 +348,7 @@ def train_model(df, feature_names):
     
     # 8. Learning rate scheduler
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', 
-                                                   patience=5, factor=0.5, verbose=True)
+                                                   patience=5, factor=0.5)
     
     # 9. Training loop with gradient monitoring
     best_val_loss = float('inf')

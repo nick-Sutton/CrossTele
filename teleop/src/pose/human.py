@@ -123,11 +123,17 @@ class Human:
         features['step_height'] = step_height
         features['left_contact_prob'] = left_contact_prob
         features['right_contact_prob'] = right_contact_prob
-        features['support_type'] = min(left_contact_prob, right_contact_prob)
-        features['left_swing_phase'] = 1.0 - left_contact_prob
-        features['right_swing_phase'] = 1.0 - right_contact_prob
+
+        if left_contact_prob > 0.5 and right_contact_prob > 0.5:
+            features['support_type'] = 'double'
+        elif left_contact_prob <= 0.5 and right_contact_prob <= 0.5:
+            features['support_type'] = 'flight'
+        else:
+            features['support_type'] = 'single'
+
+        #features['left_swing_phase'] = 1.0 - left_contact_prob
+        #features['right_swing_phase'] = 1.0 - right_contact_prob
         features['max_foot_height'] = max(left_pos_rel[2], right_pos_rel[2])
-        #features['gait_phase'] = self.curr_gait_phase
 
         
         #print("---------------------------------------------------------------------------")

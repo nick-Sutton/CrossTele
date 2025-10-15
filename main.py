@@ -3,8 +3,8 @@ import pandas as pd
 from training.train import train_model
 
 if __name__ == '__main__':
-    '''
-    df = pd.read_csv("./training/dataset/TrainingData/combined_features.csv")
+    
+    data_dir = './training/dataset/TrainingData/'
     
     feature_names = [
         'root_position_x', 'root_position_y', 'root_position_z',
@@ -16,12 +16,11 @@ if __name__ == '__main__':
         'left_pos_rel_x', 'left_pos_rel_y', 'left_pos_rel_z', 
         'right_pos_rel_x', 'right_pos_rel_y', 'right_pos_rel_z',
         'step_length', 'step_width', 'step_height',
-        'left_contact_prob', 'right_contact_prob', 'support_type',
-        'left_swing_phase', 'right_swing_phase', 'max_foot_height'
+        'left_contact_prob', 'right_contact_prob', 'support_type', 'max_foot_height'
     ]
 
-    trained_model, _, _, _, _ = train_model(df, feature_names)'''
+    trained_model, _, _, _, _ = train_model(data_dir,feature_names)
 
     #reformat_data.generate_reformatted_data()
     #reformat_data.generate_lable_data()
-    reformat_data.generate_feature_data()
+    #reformat_data.generate_feature_data()
