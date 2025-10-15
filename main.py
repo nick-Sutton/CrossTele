@@ -19,7 +19,7 @@ if __name__ == '__main__':
         'left_swing_phase', 'right_swing_phase', 'max_foot_height'
     ]
 
-    trained_model, _ = train_model(df, feature_names)
+    trained_model, _, _, _, _ = train_model(df, feature_names)
 
     #reformat_data.generate_reformatted_data()
     #reformat_data.generate_lable_data()

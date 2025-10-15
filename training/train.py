@@ -185,8 +185,21 @@ class GaitTCN(nn.Module):
         logits = self.classifier(x)
         return logits
 
-def train_model(df, feature_names):
+def setup_device():
+    """Setup device and print GPU info"""
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+        print(f"🚀 Using GPU: {torch.cuda.get_device_name()}")
+        print(f"🚀 GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+    else:
+        device = torch.device('cpu')
+        print("⚠️ Using CPU - training will be slower")
+    return device
 
+def train_model(df, feature_names):
+    # Setup device
+    device = setup_device()
+    
     # 1. Initialize preprocessor
     preprocessor = GaitDataPreprocessor()
     
@@ -212,11 +225,11 @@ def train_model(df, feature_names):
     print(f"Number of classes: {len(preprocessor.label_encoder.classes_)}")
     print(f"Classes: {preprocessor.label_encoder.classes_}")
     
-    # 5. Convert to tensors
-    X_train_tensor = torch.FloatTensor(X_train)
-    y_train_tensor = torch.LongTensor(y_train)
-    X_val_tensor = torch.FloatTensor(X_val) 
-    y_val_tensor = torch.LongTensor(y_val)
+    # 5. Convert to tensors and move to device
+    X_train_tensor = torch.FloatTensor(X_train).to(device)
+    y_train_tensor = torch.LongTensor(y_train).to(device)
+    X_val_tensor = torch.FloatTensor(X_val).to(device)
+    y_val_tensor = torch.LongTensor(y_val).to(device)
     
     # 6. Create datasets and dataloaders
     train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
@@ -225,14 +238,17 @@ def train_model(df, feature_names):
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
     
-    # 7. Initialize model
+    # 7. Initialize model and move to device
     model = GaitTCN(
         num_features=X_train.shape[2],  # [batch, seq_len, features] -> features
         num_classes=len(preprocessor.label_encoder.classes_),
         num_channels=[64, 128, 256, 512],
         kernel_size=5,
         dropout=0.3
-    )
+    ).to(device)  # ← CRITICAL: Move model to device
+    
+    # Print device info
+    print(f"Model is on: {next(model.parameters()).device}")
     
     # 8. Training setup
     optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
@@ -242,12 +258,18 @@ def train_model(df, feature_names):
     # 9. Training loop with validation
     best_val_loss = float('inf')
     
+    # Track metrics for plotting
+    train_losses = []
+    val_losses = []
+    val_accuracies = []
+    
     for epoch in range(100):
         # Training phase
         model.train()
         train_loss = 0.0
         
         for batch_X, batch_y in train_loader:
+            # Data is already on device from dataloader
             optimizer.zero_grad()
             outputs = model(batch_X)
             loss = criterion(outputs, batch_y)
@@ -276,12 +298,17 @@ def train_model(df, feature_names):
         
         scheduler.step()
         
+        # Store metrics
+        train_loss_avg = train_loss / len(train_loader)
+        val_loss_avg = val_loss / len(val_loader)
+        val_accuracy = 100 * correct / total
+        
+        train_losses.append(train_loss_avg)
+        val_losses.append(val_loss_avg)
+        val_accuracies.append(val_accuracy)
+        
         # Print progress
         if epoch % 10 == 0:
-            train_loss_avg = train_loss / len(train_loader)
-            val_loss_avg = val_loss / len(val_loader)
-            val_accuracy = 100 * correct / total
-            
             print(f'Epoch {epoch:3d}: '
                   f'Train Loss: {train_loss_avg:.4f}, '
                   f'Val Loss: {val_loss_avg:.4f}, '
@@ -290,6 +317,17 @@ def train_model(df, feature_names):
         # Save best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(), 'best_gait_model.pth')
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'val_loss': val_loss,
+                'val_accuracy': val_accuracy,
+                'preprocessor': preprocessor
+            }, 'best_gait_model.pth')
+            print(f"✅ Saved best model with val_loss: {val_loss_avg:.4f}, val_acc: {val_accuracy:.2f}%")
     
-    return model, preprocessor
+    print("Training completed!")
+    print(f"Best validation loss: {best_val_loss:.4f}")
+    
+    return model, preprocessor, train_losses, val_losses, val_accuracies
