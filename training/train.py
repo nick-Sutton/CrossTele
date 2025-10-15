@@ -18,24 +18,35 @@ class GaitDataPreprocessor:
         self.original_feature_names = None
         self.processed_feature_names = None
         self.is_fitted = False
-        self.all_possible_labels = None  # Track all possible labels
         
+        # PRE-DEFINE ALL POSSIBLE LABELS
+        known_gait_types = ['walk', 'jog', 'stand'] 
+        known_support_types = ['double', 'single', 'flight']
+        
+        # Fit encoders with known classes upfront
+        self.label_encoder.fit(known_gait_types)
+        self.support_encoder.fit(known_support_types)
+        
+        print(f"Predefined gait types: {self.label_encoder.classes_}")
+        print(f"Predefined support types: {self.support_encoder.classes_}")
+    
     def prepare_features(self, df, feature_names, is_training=False):
-        """Prepare features with proper support_type encoding"""
+        """Prepare features with predefined encoders"""
         available_features = [f for f in feature_names if f in df.columns]
         features = df[available_features].copy()
         
-        # Handle support_type text encoding
+        # Handle support_type with predefined encoder
         if 'support_type' in features.columns:
             if features['support_type'].dtype == 'object':
-                if is_training or not self.is_fitted:
-                    features['support_type_encoded'] = self.support_encoder.fit_transform(features['support_type'])
-                else:
-                    # For unseen support types, use a default value
-                    try:
-                        features['support_type_encoded'] = self.support_encoder.transform(features['support_type'])
-                    except ValueError:
-                        features['support_type_encoded'] = 0  # Default to first category
+                # Transform using predefined encoder
+                # Any unseen labels will be handled gracefully
+                try:
+                    features['support_type_encoded'] = self.support_encoder.transform(features['support_type'])
+                except ValueError as e:
+                    # Handle any truly unseen support types by mapping to default
+                    print(f"Warning: Unseen support type, using default: {e}")
+                    default_val = self.support_encoder.transform([self.support_encoder.classes_[0]])[0]
+                    features['support_type_encoded'] = default_val
                 
                 features = features.drop('support_type', axis=1)
         
