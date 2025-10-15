@@ -23,31 +23,23 @@ class GaitDataPreprocessor:
         known_gait_types = ['walk', 'jog', 'stand'] 
         known_support_types = ['double', 'single', 'flight']
         
-        # Fit encoders with known classes upfront
+        # Fit encoders with known classes upfront - ONLY ONCE
         self.label_encoder.fit(known_gait_types)
         self.support_encoder.fit(known_support_types)
         
-        print(f"Predefined gait types: {self.label_encoder.classes_}")
-        print(f"Predefined support types: {self.support_encoder.classes_}")
+        print(f"Predefined gait types: {list(self.label_encoder.classes_)}")
+        print(f"Predefined support types: {list(self.support_encoder.classes_)}")
     
     def prepare_features(self, df, feature_names, is_training=False):
         """Prepare features with predefined encoders"""
         available_features = [f for f in feature_names if f in df.columns]
         features = df[available_features].copy()
         
-        # Handle support_type with predefined encoder
+        # Handle support_type with predefined encoder - ONLY TRANSFORM
         if 'support_type' in features.columns:
             if features['support_type'].dtype == 'object':
-                # Transform using predefined encoder
-                # Any unseen labels will be handled gracefully
-                try:
-                    features['support_type_encoded'] = self.support_encoder.transform(features['support_type'])
-                except ValueError as e:
-                    # Handle any truly unseen support types by mapping to default
-                    print(f"Warning: Unseen support type, using default: {e}")
-                    default_val = self.support_encoder.transform([self.support_encoder.classes_[0]])[0]
-                    features['support_type_encoded'] = default_val
-                
+                # Transform using predefined encoder - NO FITTING
+                features['support_type_encoded'] = self.support_encoder.transform(features['support_type'])
                 features = features.drop('support_type', axis=1)
         
         self.processed_feature_names = [col for col in features.columns]
@@ -71,61 +63,26 @@ class GaitDataPreprocessor:
         return np.array(sequences), np.array(sequence_labels)
     
     def fit_transform(self, df, feature_names, sequence_length=60, stride=10):
-        """Fit on training data - but collect ALL labels first"""
-        if not self.is_fitted:
-            # First time - initialize
-            self.original_feature_names = feature_names
-            self.is_fitted = True
-            
-            # For the first file, just store the labels but don't fit yet
-            self.all_possible_labels = set(df['gait_type'].unique())
-            print(f"Initial labels collected: {self.all_possible_labels}")
-            
-            # Process features but don't fit label encoder yet
-            features = self.prepare_features(df, feature_names, is_training=True)
-            scaled_features = self.scaler.fit_transform(features)
-            scaled_features_df = pd.DataFrame(scaled_features, columns=self.processed_feature_names)
-            
-            # Store the sequences for later processing
-            self.pending_sequences = (scaled_features_df, df['gait_type'])
-            
-            return np.array([]), np.array([])  # Return empty for now
-            
-        else:
-            # Subsequent files - collect more labels
-            self.all_possible_labels.update(df['gait_type'].unique())
-            print(f"Updated labels: {self.all_possible_labels}")
-            
-            # Process this file
-            features = self.prepare_features(df, feature_names, is_training=False)
-            scaled_features = self.scaler.transform(features)  # Use fitted scaler
-            scaled_features_df = pd.DataFrame(scaled_features, columns=self.processed_feature_names)
-            
-            # Store sequences
-            self.pending_sequences = (scaled_features_df, df['gait_type'])
-            
-            return np.array([]), np.array([])
-    
-    def finalize_fit(self):
-        """Finalize fitting after seeing all training data"""
-        if not hasattr(self, 'pending_sequences'):
-            return np.array([]), np.array([])
-            
-        # Now fit the label encoder with ALL possible labels
-        all_labels_list = sorted(list(self.all_possible_labels))
-        self.label_encoder.fit(all_labels_list)
-        print(f"Final label encoder classes: {self.label_encoder.classes_}")
+        """Fit scaler only - labels are already predefined"""
+        self.is_fitted = True
+        self.original_feature_names = feature_names
         
-        # Process all stored sequences
-        scaled_features_df, gait_series = self.pending_sequences
-        encoded_labels = self.label_encoder.transform(gait_series)
-        encoded_labels_series = pd.Series(encoded_labels, index=gait_series.index)
+        features = self.prepare_features(df, feature_names, is_training=True)
+        
+        # Fit scaler only (labels are already encoded)
+        scaled_features = self.scaler.fit_transform(features)
+        scaled_features_df = pd.DataFrame(scaled_features, columns=self.processed_feature_names)
+        
+        # Transform gait labels using predefined encoder
+        encoded_labels = self.label_encoder.transform(df['gait_type'])
+        encoded_labels_series = pd.Series(encoded_labels, index=df.index)
         
         # Create sequences
         X_sequences, y_sequences = self.create_sequences(
-            scaled_features_df, encoded_labels_series, sequence_length=60, stride=10
+            scaled_features_df, encoded_labels_series, sequence_length, stride
         )
         
+        print(f"Processed {len(X_sequences)} sequences with {len(self.processed_feature_names)} features")
         return X_sequences, y_sequences
     
     def transform(self, df, sequence_length=60, stride=10):
@@ -137,15 +94,8 @@ class GaitDataPreprocessor:
         scaled_features = self.scaler.transform(features)
         scaled_features_df = pd.DataFrame(scaled_features, columns=self.processed_feature_names)
         
-        # Handle unseen labels in validation data
-        try:
-            encoded_labels = self.label_encoder.transform(df['gait_type'])
-        except ValueError as e:
-            print(f"Warning: Unseen labels in validation data: {e}")
-            # Map unseen labels to a default class (e.g., the most common one)
-            default_label = self.label_encoder.transform([self.label_encoder.classes_[0]])[0]
-            encoded_labels = np.full(len(df), default_label)
-        
+        # Transform gait labels using predefined encoder
+        encoded_labels = self.label_encoder.transform(df['gait_type'])
         encoded_labels_series = pd.Series(encoded_labels, index=df.index)
         
         X_sequences, y_sequences = self.create_sequences(
@@ -289,37 +239,26 @@ def train_model(data_dir, feature_names, train_ratio=0.8):
     print(f"Training takes: {len(train_files)}")
     print(f"Validation takes: {len(val_files)}")
     
-    # Initialize preprocessor
+    # Initialize preprocessor 
     preprocessor = GaitDataPreprocessor()
     
-    # 1. FIRST PASS: Process all training files to collect ALL labels
-    print("First pass: Collecting all gait labels...")
+    # Process training files (single pass)
     all_train_sequences = []
     all_train_labels = []
     
     for i, train_file in enumerate(train_files):
-        print(f"  Processing take {i+1}/{len(train_files)}: {os.path.basename(train_file)}")
         df = pd.read_csv(train_file)
-        
-        # This collects labels but doesn't finalize encoding yet
-        X_take, y_take = preprocessor.fit_transform(df, feature_names)
-        
-        # Store the data for final processing
-        if i == len(train_files) - 1:  # Last file, finalize
-            X_final, y_final = preprocessor.finalize_fit()
-            if len(X_final) > 0:
-                all_train_sequences.append(X_final)
-                all_train_labels.append(y_final)
+        X_take, y_take = preprocessor.fit_transform(df, feature_names)  # Fits SCALER only
+        all_train_sequences.append(X_take)
+        all_train_labels.append(y_take)
     
-    # 2. SECOND PASS: Now process validation files with finalized encoder
-    print("Processing validation takes...")
+    # Process validation files
     all_val_sequences = []
     all_val_labels = []
     
     for i, val_file in enumerate(val_files):
-        print(f"  Validation take {i+1}/{len(val_files)}: {os.path.basename(val_file)}")
         df = pd.read_csv(val_file)
-        X_take, y_take = preprocessor.transform(df, sequence_length=60, stride=10)
+        X_take, y_take = preprocessor.transform(df)  # Uses fitted scaler & encoders
         all_val_sequences.append(X_take)
         all_val_labels.append(y_take)
     
