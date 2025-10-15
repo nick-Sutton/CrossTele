@@ -232,7 +232,7 @@ def get_features(input_file, output_file):
         human.extract_gait_features(features)
         
         # Add gait label
-        features['gait_type'] = gait_label
+        features['gait_type'] = row['gait_type']
         
         # Add frame info
         features['frame_id'] = index

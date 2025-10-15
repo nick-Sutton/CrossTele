@@ -3,7 +3,7 @@ import pandas as pd
 from training.train import train_model
 
 if __name__ == '__main__':
-    
+    '''
     data_dir = './training/dataset/TrainingData/'
     
     feature_names = [
@@ -19,8 +19,8 @@ if __name__ == '__main__':
         'left_contact_prob', 'right_contact_prob', 'support_type', 'max_foot_height'
     ]
 
-    trained_model, _, _, _, _ = train_model(data_dir,feature_names)
+    trained_model, _, _, _, _ = train_model(data_dir,feature_names)'''
 
     #reformat_data.generate_reformatted_data()
     #reformat_data.generate_lable_data()
-    #reformat_data.generate_feature_data()
+    reformat_data.generate_feature_data()
