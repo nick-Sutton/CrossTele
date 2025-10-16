@@ -16,8 +16,10 @@ class Human:
         self.curr_twist = {}
         self.prev_twist = {}
 
-        #self.curr_gait_phase = 0.0
-        #self.prev_gait_phase = 0.0
+        # NEW: Track foot contact events for timing
+        self.last_left_contact_frame = 0
+        self.last_right_contact_frame = 0
+        self.frames_since_last_contact = 0
 
     def calc_contact_probability(self, vel, height, vel_threshold=0.3, height_threshold=0.05):
         vel_mag = np.linalg.norm(vel)
@@ -32,33 +34,7 @@ class Human:
 
         return np.clip(contact_prob, 0 ,1)
     
-    
-    #def estimate_gait_phase(self, left_contact_prob, right_contact_prob, prev_phase=0):
-    #
-    #    # phase progression based on contact patterns
-    #    if left_contact_prob > 0.8 and right_contact_prob > 0.8:
-    #        return prev_phase  # Or reset to 0.0
-    #    elif left_contact_prob > 0.8 and right_contact_prob < 0.2:
-    #        phase = 0.0  # Left heel strike approximation
-    #    elif left_contact_prob < 0.5 and right_contact_prob < 0.5:
-    #        phase = 0.25  # Mid swing
-    #    elif left_contact_prob < 0.2 and right_contact_prob > 0.8:
-    #        phase = 0.5  # Right heel strike
-    #    elif left_contact_prob < 0.5 and right_contact_prob < 0.5:
-    #        phase = 0.75  # Mid swing
-    #    else:
-    #        # Smooth progression based on previous phase
-    #        phase = (prev_phase + 0.05) % 1.0
-    #    
-    #    return phase
-    
-
-    #
-    #                     ┌→ Human gait classification (auxiliary task)
-    # Raw human features ─┤
-    #                     └→ Quadruped commands (primary task)
-    #
-    def extract_gait_features(self, features):
+    def extract_gait_features(self, features, frame_idx):
         left_pos = np.array([self.curr_pose["LFoot"].positionX, self.curr_pose["LFoot"].positionY, self.curr_pose["LFoot"].positionZ])
         right_pos = np.array([self.curr_pose["RFoot"].positionX, self.curr_pose["RFoot"].positionY, self.curr_pose["RFoot"].positionZ])
         root_pos = np.array([self.curr_pose["Root"].positionX, self.curr_pose["Root"].positionY, self.curr_pose["Root"].positionZ])
@@ -88,8 +64,18 @@ class Human:
         left_contact_prob = self.calc_contact_probability(left_lv, left_height)
         right_contact_prob = self.calc_contact_probability(right_lv, right_height)
 
-        # determine gait phase
-        # self.curr_gait_phase = self.estimate_gait_phase(left_contact_prob, right_contact_prob, self.prev_gait_phase)
+        # NEW: Track foot contacts for timing
+        contact_threshold = 0.7
+        if left_contact_prob > contact_threshold:
+            self.last_left_contact_frame = frame_idx
+        if right_contact_prob > contact_threshold:
+            self.last_right_contact_frame = frame_idx
+        
+        # Calculate frames since last contact (either foot)
+        self.frames_since_last_contact = frame_idx - max(
+            self.last_left_contact_frame, 
+            self.last_right_contact_frame
+        )
 
         # Kinematic features
         features['root_position_x'] = root_pos[0]

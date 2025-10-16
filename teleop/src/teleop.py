@@ -11,6 +11,7 @@ from pose.pose import Pose
 from pose.twist import Twist
 from ctrl_interface.ctrl_interface import CtrlInterface
 import ct_math.ct_math as ctm
+from model.gait_classifier import GaitClassifier
 
 def run_offline_mode(args):
         df = pd.read_csv(args.input_file)
@@ -19,6 +20,7 @@ def run_offline_mode(args):
         # Define dataset Sampling frequency and construct human object
         sampling_freq = 240.0
         human = Human(sampling_freq)
+        gc = GaitClassifier('./teleop/src/model/ModelV1.pth')
 
         # Make the robot stand and wait a second to give it time
         CtrlInterface.stand(0, 0, 0)
@@ -75,16 +77,28 @@ def run_offline_mode(args):
             target_twist["Robot"] = Twist(curr_timestep, robot_lv, robot_av)
 
             features = {}
-            human.extract_gait_features(features)
+            human.extract_gait_features(features, index)
 
             performance_logger.log_metrics()
             #performance_logger.print_metric_summary()
 
-            # If you need to scale the values change this variable
-            scale = 1.0
-            CtrlInterface.walk(scale * target_twist["Robot"].linear_velocity[0], 
-                               scale * target_twist["Robot"].linear_velocity[1], 
-                               0.0 * target_twist["Robot"].angular_velocity[2])
+            # This is where I was manually selecting the robot command
+            #scale = 1.0
+            #CtrlInterface.walk(scale * target_twist["Robot"].linear_velocity[0], 
+            #                   scale * target_twist["Robot"].linear_velocity[1], 
+            #                   0.0 * target_twist["Robot"].angular_velocity[2])
+
+            # Get gait prediction from model
+            gait_prediction, confidence, probabilities = gc.predict(features)
+
+            # Select robot command based on gait and timing
+            gc.select_robot_command(
+                gait_prediction, 
+                confidence, 
+                human.frames_since_last_contact,
+                target_twist["Robot"],
+                sampling_freq
+            )
             
             robot_orientation = CtrlInterface.get_robot_orientation()
             robot_position = CtrlInterface.get_robot_position()
@@ -95,8 +109,8 @@ def run_offline_mode(args):
 
             # Sleep for the duration of the remaining time-step
             end_time = perf_counter()
-            elapsed_time = end_time - start_time
-            sleep(dt - elapsed_time)
+            #elapsed_time = end_time - start_time
+            #sleep(dt - elapsed_time)
 
             # Update timestep
             prev_timestep = curr_timestep

@@ -68,7 +68,7 @@ class PerformanceMetrics():
         self.total_rfoot_position = {}
         self.total_lfoot_lv = {}
         self.total_rfoot_lv = {}
-        self.gait_phase = {}
+        #self.gait_phase = {}
 
     def _init_csv_file(self):
         """Initialize CSV file with headers"""
@@ -185,7 +185,7 @@ class PerformanceMetrics():
         self.total_linear_velocity_metrics[self.source_twist["Root"].timestep] = metrics
         self.total_lfoot_lv[self.source_twist["LFoot"].timestep] = self.source_twist["LFoot"].linear_velocity
         self.total_rfoot_lv[self.source_twist["RFoot"].timestep] = self.source_twist["RFoot"].linear_velocity
-        self.gait_phase[self.source_twist["RFoot"].timestep] = self.human.curr_gait_phase
+        #self.gait_phase[self.source_twist["RFoot"].timestep] = self.human.curr_gait_phase
         return metrics
 
     def angular_velocity_metrics(self):
@@ -598,7 +598,7 @@ class PerformanceMetrics():
         r_foot_z_positions = []
         l_foot_lv = []
         r_foot_lv = []
-        gait_phase = []
+        #gait_phase = []
 
         
         # Sort by timestep to ensure proper time ordering
@@ -620,8 +620,8 @@ class PerformanceMetrics():
         for _, position in self.total_lfoot_position.items():
             l_foot_z_positions.append(position[2])
 
-        for _, gp in self.gait_phase.items():
-            gait_phase.append(gp)
+        #for _, gp in self.gait_phase.items():
+        #    gait_phase.append(gp)
         
         # Convert to numpy arrays for easier manipulation
         timesteps = np.array(timesteps)
@@ -631,7 +631,7 @@ class PerformanceMetrics():
         r_foot_z_positions = np.array(r_foot_z_positions)
         l_foot_lv = np.array(l_foot_lv)
         r_foot_lv = np.array(r_foot_lv)
-        gait_phase = np.array(gait_phase)
+        #gait_phase = np.array(gait_phase)
         
         # Plot 1: X and Y position of Base
         plt.subplot(4, 2, 1)
