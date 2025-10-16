@@ -131,8 +131,6 @@ class Human:
         else:
             features['support_type'] = 'single'
 
-        #features['left_swing_phase'] = 1.0 - left_contact_prob
-        #features['right_swing_phase'] = 1.0 - right_contact_prob
         features['max_foot_height'] = max(left_pos_rel[2], right_pos_rel[2])
 
         

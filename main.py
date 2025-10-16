@@ -3,7 +3,7 @@ import pandas as pd
 from training.train import train_model
 
 if __name__ == '__main__':
-    '''
+    
     data_dir = './training/dataset/TrainingData/'
     
     feature_names = [
@@ -18,9 +18,11 @@ if __name__ == '__main__':
         'step_length', 'step_width', 'step_height',
         'left_contact_prob', 'right_contact_prob', 'support_type', 'max_foot_height'
     ]
-
-    trained_model, _, _, _, _ = train_model(data_dir,feature_names)'''
+    
+    model, preprocessor, train_losses, val_losses, val_accs = train_model(
+        data_dir, feature_names, sequence_length=60, stride=30
+    )
 
     #reformat_data.generate_reformatted_data()
     #reformat_data.generate_lable_data()
-    reformat_data.generate_feature_data()
+    #reformat_data.generate_feature_data()
