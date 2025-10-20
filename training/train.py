@@ -839,7 +839,7 @@ def train_model(data_dir, feature_names,
                               num_channels=[32, 64, 128],
                               kernel_size=7, dropout=0.5,
                               learning_rate=1e-3, weight_decay=1e-3,
-                              batch_size=128, max_epochs=100,
+                              batch_size=64, max_epochs=100,
                               run_analysis=True, save_dir='./models'):
     """
     Enhanced training with automatic analysis
