@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime
 import glob
 import os
 import torch
@@ -831,6 +831,8 @@ def recreate_dataloaders_from_checkpoint(checkpoint, data_dir, device):
     return train_loader, val_loader
 
 
+# dropout may 0.2 or 0.3 based on experiments
+# Consider replaceing the single 7x7 kernal with three 
 def train_model(data_dir, feature_names, 
                               sequence_length=60, stride=30,
                               num_channels=[64, 128, 256],
@@ -1019,8 +1021,9 @@ def train_model(data_dir, feature_names,
         print(f"{'='*80}\n")
         
         # Load best model
-        model.load_state_dict(torch.load(save_path)['model_state_dict'])
-        
+
+        model.load_state_dict(torch.load(save_path, weights_only=False)['model_state_dict'])
+
         # Create analysis directory
         analysis_dir = os.path.join(save_dir, f'{model_name}_analysis')
         os.makedirs(analysis_dir, exist_ok=True)

@@ -1,0 +1,72 @@
+{
+  "architecture": {
+    "num_features": 31,
+    "num_classes": 3,
+    "num_channels": [
+      64,
+      64,
+      128,
+      128,
+      256,
+      256
+    ],
+    "kernel_size": 7,
+    "dropout": 0.3
+  },
+  "best_val_accuracy": 93.28859060402685,
+  "final_epoch": 5,
+  "config": {
+    "sequence_length": 60,
+    "stride": 30,
+    "num_channels": [
+      64,
+      128,
+      256
+    ],
+    "kernel_size": 7,
+    "dropout": 0.3,
+    "learning_rate": 0.001,
+    "weight_decay": 1e-05,
+    "batch_size": 64,
+    "max_epochs": 100
+  },
+  "feature_names": [
+    "root_position_x",
+    "root_position_y",
+    "root_position_z",
+    "root_orientation_x",
+    "root_orientation_y",
+    "root_orientation_z",
+    "root_linear_velocity_x",
+    "root_linear_velocity_y",
+    "root_linear_velocity_z",
+    "root_angular_velocity_x",
+    "root_angular_velocity_y",
+    "root_angular_velocity_z",
+    "left_linear_velocity_x",
+    "left_linear_velocity_y",
+    "left_linear_velocity_z",
+    "right_linear_velocity_x",
+    "right_linear_velocity_y",
+    "right_linear_velocity_z",
+    "left_pos_rel_x",
+    "left_pos_rel_y",
+    "left_pos_rel_z",
+    "right_pos_rel_x",
+    "right_pos_rel_y",
+    "right_pos_rel_z",
+    "step_length",
+    "step_width",
+    "step_height",
+    "left_contact_prob",
+    "right_contact_prob",
+    "support_type",
+    "max_foot_height"
+  ],
+  "class_names": [
+    "jog",
+    "stand",
+    "walk"
+  ],
+  "timestamp": "2025-10-20 15:57:13"
+}
