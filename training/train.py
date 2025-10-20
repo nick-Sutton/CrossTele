@@ -831,14 +831,15 @@ def recreate_dataloaders_from_checkpoint(checkpoint, data_dir, device):
     return train_loader, val_loader
 
 
-# dropout may 0.2 or 0.3 based on experiments
+# dropout may 0.2 or 0.3 or 0.5 based on experiments
+# Reduced channels from 64, 128, 256 for complexity
 # Consider replaceing the single 7x7 kernal with three 
 def train_model(data_dir, feature_names, 
-                              sequence_length=60, stride=30,
-                              num_channels=[64, 128, 256],
-                              kernel_size=7, dropout=0.3,
-                              learning_rate=1e-3, weight_decay=1e-5,
-                              batch_size=64, max_epochs=100,
+                              sequence_length=80, stride=20,
+                              num_channels=[32, 64, 128],
+                              kernel_size=7, dropout=0.5,
+                              learning_rate=1e-3, weight_decay=1e-3,
+                              batch_size=128, max_epochs=100,
                               run_analysis=True, save_dir='./models'):
     """
     Enhanced training with automatic analysis
