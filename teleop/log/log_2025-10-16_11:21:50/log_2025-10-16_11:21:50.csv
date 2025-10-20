@@ -1,0 +1,2 @@
+timestep,position_error,x_error,y_error,z_error,linear_velocity_error,x_vel_error,y_vel_error,z_vel_error,angular_velocity_error,rx_vel_error,ry_vel_error,rz_vel_error
+0.004167,0.0,-0.0,-0.0,0.0,0.0,0.0,-0.0,-0.0,0.0,-0.0,-0.0,-0.0

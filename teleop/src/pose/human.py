@@ -4,7 +4,7 @@ import numpy as np
 
 
 class Human:
-    def __init__(self, sampling_freq, history_size = 10):
+    def __init__(self, sampling_freq, history_size = 60):
         self.dt = 1.0 / sampling_freq
 
         self.history = deque(maxlen=history_size)

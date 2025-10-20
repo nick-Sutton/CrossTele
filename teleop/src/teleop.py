@@ -123,15 +123,6 @@ def run_offline_mode(args):
         performance_logger.plot_metrics()
         print("Done")
 
-
-
-# Feed Forward NN
-# Recurrent Neural Network
-# LSTM encoder -> LSTM decoder
-# Just use a Transformer bro
-# GRU
-# TCN
-# TGNN
 num_frames = 0
 def receive_new_frame(data_frame: DataFrame):
     global num_frames

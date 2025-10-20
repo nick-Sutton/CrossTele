@@ -1,9 +1,16 @@
+import glob
+import os
+import numpy as np
+import torch
 from util import reformat_data
+from util import data_fixer
 import pandas as pd
 from training.train import train_model
 
 if __name__ == '__main__':
     
+    
+    #Train Model
     data_dir = './training/dataset/TrainingData/'
     
     feature_names = [
@@ -19,10 +26,16 @@ if __name__ == '__main__':
         'left_contact_prob', 'right_contact_prob', 'support_type', 'max_foot_height'
     ]
     
-    model, preprocessor, train_losses, val_losses, val_accs = train_model(
-        data_dir, feature_names, sequence_length=60, stride=30
+    model, preprocessor, *history, save_path = train_model(
+        data_dir='./training/dataset/TrainingData',
+        feature_names=feature_names,
+        run_analysis=True,
+        save_dir='./models'
     )
+    
+
 
     #reformat_data.generate_reformatted_data()
     #reformat_data.generate_lable_data()
     #reformat_data.generate_feature_data()
+    #data_fixer.generate_feature_data()

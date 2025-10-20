@@ -1,6 +1,7 @@
 from collections import deque
 import copy
 import numpy as np
+import pandas as pd
 import torch
 from ctrl_interface.ctrl_interface import CtrlInterface
 
@@ -45,18 +46,35 @@ class GaitClassifier:
         self.is_ready = False
         
     def _prepare_features(self, raw_features):
-        """Convert feature dict to processed array."""
-        feature_values = []
-        for feature_name in self.preprocessor.original_feature_names:
-            if feature_name == 'support_type':
-                support_val = raw_features[feature_name]
-                encoded_val = self.preprocessor.support_encoder.transform([support_val])[0]
-                feature_values.append(encoded_val)
-            else:
-                feature_values.append(raw_features[feature_name])
+        """Convert feature dict to processed array with feature name mapping."""
+        import pandas as pd
         
-        feature_array = np.array(feature_values, dtype=np.float32)
-        feature_array = self.preprocessor.scaler.transform(feature_array.reshape(1, -1))
+        # Map from original feature names to processed feature names
+        feature_mapping = {}
+        for orig_name in self.preprocessor.original_feature_names:
+            if orig_name == 'support_type':
+                feature_mapping[orig_name] = 'support_type_encoded'
+            else:
+                feature_mapping[orig_name] = orig_name
+        
+        # Create feature dict with processed feature names
+        feature_dict = {}
+        for orig_name, processed_name in feature_mapping.items():
+            if orig_name == 'support_type':
+                support_val = raw_features.get('support_type', 'double')
+                if support_val not in self.preprocessor.support_encoder.classes_:
+                    print(f"Warning: Unknown support type '{support_val}', using 'double'")
+                    support_val = 'double'
+                encoded_val = self.preprocessor.support_encoder.transform([support_val])[0]
+                feature_dict[processed_name] = encoded_val
+            else:
+                feature_dict[processed_name] = float(raw_features.get(orig_name, 0.0))
+        
+        # Create DataFrame with processed feature names
+        feature_df = pd.DataFrame([feature_dict])[self.preprocessor.processed_feature_names]
+        
+        # Transform using the scaler
+        feature_array = self.preprocessor.scaler.transform(feature_df)
         return feature_array.flatten()
     
     def predict(self, raw_features):
@@ -119,14 +137,14 @@ class GaitClassifier:
         if gait_prediction is None or confidence < 0.6:
             return 0.0, 0.0, 0.0
         
+        print(f"Gait: {gait_prediction}")
         # Base scaling factors for each gait type
         if gait_prediction == 'stand':
             scale = 0.0
 
-            rx = scale * target_twist.angular_velocity[0]
-            ry = scale * target_twist.angular_velocity[1]
+            vrz = scale * target_twist.angular_velocity[2]
 
-            CtrlInterface.stand(rx=rx, ry=ry,rz=0)
+            CtrlInterface.walk(vx=0, vy=0,vrz=vrz)
             
         elif gait_prediction == 'walk':
             # Walking: moderate speed
@@ -138,7 +156,7 @@ class GaitClassifier:
             
             vx = scale * target_twist.linear_velocity[0]
             vy = scale * target_twist.linear_velocity[1]
-            vrz = 0.0 * target_twist.angular_velocity[2]
+            vrz = 0.05 *target_twist.angular_velocity[2]
 
             CtrlInterface.walk(vx, vy, vrz)
             
@@ -151,8 +169,11 @@ class GaitClassifier:
                 scale = 1.2
             
             vx = scale * target_twist.linear_velocity[0]
+            vy = scale * target_twist.linear_velocity[1]
+            vrz = 0.05 * target_twist.angular_velocity[2]
 
-            CtrlInterface.bound(vx)
+            CtrlInterface.walk(vx, vy, vrz)
+            #CtrlInterface.bound(vx)
         
         else:
             # Unknown gait: default to standing
