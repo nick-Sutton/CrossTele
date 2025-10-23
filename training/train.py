@@ -1515,6 +1515,14 @@ def train_model(data_dir, feature_names,
             train_losses, val_losses, val_accuracies,
             save_dir=analysis_dir
         )
+        true_class='stand'
+        pred_class='walk'
+
+        analyzer = FeatureMisclassificationAnalyzer(model, preprocessor, device)
+        results = analyzer.generate_misclassification_report(
+            val_loader, true_class, pred_class,
+            save_dir=f'misclass_analysis_{true_class}_to_{pred_class}'
+        )
         
         print(f"\n✓ Analysis complete! Results saved to: {analysis_dir}")
     
