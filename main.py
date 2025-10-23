@@ -5,7 +5,7 @@ import torch
 from util import reformat_data
 from util import data_fixer
 import pandas as pd
-from training.train import analyze_misclassification, train_model
+from training.train import analyze_misclassification, cross_validate_hyperparam_search, train_model
 
 if __name__ == '__main__':
     
@@ -32,6 +32,21 @@ if __name__ == '__main__':
         run_analysis=True,
         save_dir='./models'
     )
+
+    param_grid = {
+    'sequence_length': [60, 80, 100],
+    'stride': [20, 30, 40],
+    'num_channels': [[32, 64, 128], [64, 128, 256], [32, 64, 128, 256]],
+    'kernel_size': [5, 7, 9],
+    'dropout': [0.3, 0.4, 0.5],
+    'learning_rate': [1e-3, 5e-4, 1e-4],
+    'weight_decay': [1e-3, 1e-4, 1e-5],
+    'batch_size': [32, 64],
+    'max_epochs': [100],
+    'balance_data': [False, True]
+}
+
+    results = cross_validate_hyperparam_search(data_dir, feature_names, param_grid, k_folds=5)
     
 
 
