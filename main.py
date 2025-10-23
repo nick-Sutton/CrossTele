@@ -5,7 +5,7 @@ import torch
 from util import reformat_data
 from util import data_fixer
 import pandas as pd
-from training.train import analyze_misclassification, cross_validate_hyperparam_search, train_model
+from training.train import analyze_misclassification, train_model
 
 if __name__ == '__main__':
     
@@ -30,9 +30,9 @@ if __name__ == '__main__':
         data_dir='./training/dataset/TrainingData',
         feature_names=feature_names,
         run_analysis=True,
-        save_dir='./models'
-    )
-
+        save_dir='./models')
+    
+    '''
     param_grid = {
     'sequence_length': [60, 80, 100],
     'stride': [20, 30, 40],
@@ -44,10 +44,10 @@ if __name__ == '__main__':
     'batch_size': [32, 64],
     'max_epochs': [100],
     'balance_data': [False, True]
-}
+    }
 
-    results = cross_validate_hyperparam_search(data_dir, feature_names, param_grid, k_folds=5)
-    
+    #results = cross_validate_hyperparam_search(data_dir, feature_names, param_grid, k_folds=5)
+    '''
 
 
     #reformat_data.generate_reformatted_data()

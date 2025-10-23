@@ -1274,7 +1274,7 @@ def recreate_dataloaders_from_checkpoint(checkpoint, data_dir, device):
     take_files = sorted(glob.glob(os.path.join(data_dir, "*.csv")))
     np.random.seed(42)
     np.random.shuffle(take_files)
-    split_idx = int(len(take_files) * 0.8)
+    split_idx = int(len(take_files) * 0.6)
     train_files = take_files[:split_idx]
     val_files = take_files[split_idx:]
     
@@ -1322,11 +1322,11 @@ from sklearn.utils.class_weight import compute_class_weight
 # Reduced channels from 64, 128, 256 for complexity
 # Consider replaceing the single 7x7 kernal with three 
 def train_model(data_dir, feature_names, 
-                              sequence_length=80, stride=20,
+                              sequence_length=60, stride=30,
                               num_channels=[32, 64, 128],
-                              kernel_size=7, dropout=0.5,
-                              learning_rate=1e-3, weight_decay=1e-3,
-                              batch_size=64, max_epochs=100,
+                              kernel_size=6, dropout=0.5,
+                              learning_rate=1e-3, weight_decay=5e-3,
+                              batch_size=64, max_epochs=25,
                               run_analysis=True, save_dir='./models'):
     """
     Enhanced training with automatic analysis
@@ -1364,7 +1364,7 @@ def train_model(data_dir, feature_names,
     
     np.random.seed(42)
     np.random.shuffle(take_files)
-    split_idx = int(len(take_files) * 0.8)
+    split_idx = int(len(take_files) * 0.6)
     train_files = take_files[:split_idx]
     val_files = take_files[split_idx:]
     
@@ -1422,9 +1422,13 @@ def train_model(data_dir, feature_names,
     
     # Training setup
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
-    scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer, T_0=10, T_mult=2
+    criterion = nn.CrossEntropyLoss(weight=class_weights_tensor, label_smoothing=0.1)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode='min',
+        factor=0.5,
+        patience=5,
+        min_lr=1e-6
     )
     
     # Training loop
@@ -1472,7 +1476,7 @@ def train_model(data_dir, feature_names,
         val_loss_avg = val_loss / len(val_loader)
         val_accuracy = 100 * correct / total
         
-        scheduler.step()
+        scheduler.step(val_loss_avg)
         
         train_losses.append(train_loss_avg)
         val_losses.append(val_loss_avg)
@@ -1543,176 +1547,3 @@ def train_model(data_dir, feature_names,
         print(f"\n✓ Analysis complete! Results saved to: {analysis_dir}")
     
     return model, preprocessor, train_losses, val_losses, val_accuracies, save_path
-
-def cross_validate_hyperparam_search(data_dir, feature_names, param_grid, k_folds=5):
-    """
-    Grid search with cross-validation on take files
-    """
-    from itertools import product
-    
-    # Get all files
-    take_files = sorted(glob.glob(os.path.join(data_dir, "*.csv")))
-    np.random.seed(42)
-    np.random.shuffle(take_files)
-    
-    # Split into k folds
-    fold_size = len(take_files) // k_folds
-    folds = [take_files[i*fold_size:(i+1)*fold_size] for i in range(k_folds)]
-    if len(take_files) % k_folds != 0:
-        folds[-1].extend(take_files[k_folds*fold_size:])
-    
-    results = []
-    
-    # Generate all parameter combinations
-    param_names = list(param_grid.keys())
-    param_values = [param_grid[name] for name in param_names]
-    
-    for param_combo in product(*param_values):
-        params = dict(zip(param_names, param_combo))
-        print(f"\n{'='*80}")
-        print(f"Testing: {params}")
-        print(f"{'='*80}")
-        
-        fold_accuracies = []
-        
-        # K-fold cross validation
-        for fold_idx in range(k_folds):
-            print(f"\nFold {fold_idx + 1}/{k_folds}")
-            
-            # Create train/val split for this fold
-            val_files = folds[fold_idx]
-            train_files = [f for i, fold in enumerate(folds) if i != fold_idx for f in fold]
-            
-            # Train with these parameters
-            val_acc = train_single_fold(
-                train_files, val_files, feature_names, params
-            )
-            fold_accuracies.append(val_acc)
-        
-        avg_acc = np.mean(fold_accuracies)
-        std_acc = np.std(fold_accuracies)
-        
-        result = {
-            'params': params,
-            'mean_accuracy': avg_acc,
-            'std_accuracy': std_acc,
-            'fold_accuracies': fold_accuracies
-        }
-        results.append(result)
-        
-        print(f"\nResult: {avg_acc:.2f}% ± {std_acc:.2f}%")
-    
-    # Sort by mean accuracy
-    results.sort(key=lambda x: x['mean_accuracy'], reverse=True)
-    
-    # Print summary
-    print(f"\n{'='*80}")
-    print("HYPERPARAMETER SEARCH RESULTS")
-    print(f"{'='*80}\n")
-    
-    for i, result in enumerate(results[:5], 1):
-        print(f"{i}. Accuracy: {result['mean_accuracy']:.2f}% ± {result['std_accuracy']:.2f}%")
-        print(f"   Params: {result['params']}\n")
-    
-    return results
-
-
-def train_single_fold(train_files, val_files, feature_names, params):
-    """Train model for one fold with given parameters"""
-    device = setup_device()
-    
-    # Prepare data
-    preprocessor = GaitDataPreprocessor()
-    X_train, y_train = preprocessor.fit_transform(
-        train_files, feature_names,
-        sequence_length=params['sequence_length'],
-        stride=params['stride']
-    )
-    X_val, y_val = preprocessor.transform(
-        val_files,
-        sequence_length=params['sequence_length'],
-        stride=params['stride']
-    )
-    
-    
-    # Create loaders
-    train_loader = DataLoader(
-        TensorDataset(
-            torch.FloatTensor(X_train).to(device),
-            torch.LongTensor(y_train).to(device)
-        ),
-        batch_size=params['batch_size'], shuffle=True
-    )
-    val_loader = DataLoader(
-        TensorDataset(
-            torch.FloatTensor(X_val).to(device),
-            torch.LongTensor(y_val).to(device)
-        ),
-        batch_size=params['batch_size'], shuffle=False
-    )
-    
-    # Class weights
-    class_weights = compute_class_weight(
-        'balanced', classes=np.unique(y_train), y=y_train
-    )
-    criterion = nn.CrossEntropyLoss(
-        weight=torch.FloatTensor(class_weights).to(device)
-    )
-    
-    # Build model
-    model = GaitTCN(
-        num_features=X_train.shape[2],
-        num_classes=len(preprocessor.label_encoder.classes_),
-        num_channels=params['num_channels'],
-        kernel_size=params['kernel_size'],
-        dropout=params['dropout']
-    ).to(device)
-    
-    optimizer = optim.AdamW(
-        model.parameters(),
-        lr=params['learning_rate'],
-        weight_decay=params['weight_decay']
-    )
-    scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer, T_0=10, T_mult=2
-    )
-    
-    # Training loop (simplified)
-    best_val_acc = 0
-    patience = 0
-    max_patience = 15
-    
-    for epoch in range(params['max_epochs']):
-        # Training
-        model.train()
-        for batch_X, batch_y in train_loader:
-            optimizer.zero_grad()
-            outputs = model(batch_X)
-            loss = criterion(outputs, batch_y)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
-        
-        # Validation
-        model.eval()
-        correct = 0
-        total = 0
-        with torch.no_grad():
-            for batch_X, batch_y in val_loader:
-                outputs = model(batch_X)
-                _, predicted = torch.max(outputs, 1)
-                total += batch_y.size(0)
-                correct += (predicted == batch_y).sum().item()
-        
-        val_acc = 100 * correct / total
-        scheduler.step()
-        
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            patience = 0
-        else:
-            patience += 1
-            if patience >= max_patience:
-                break
-    
-    return best_val_acc
