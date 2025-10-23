@@ -439,6 +439,7 @@ class FeatureMisclassificationAnalyzer:
         if analysis_results is None:
             return None
         
+        '''
         # Generate visualizations
         print("\n📊 Generating feature distributions...")
         self.plot_feature_distributions(analysis_results, 
@@ -455,6 +456,7 @@ class FeatureMisclassificationAnalyzer:
         print("\n🎯 Generating decision boundary projection...")
         self.plot_decision_boundary_projection(analysis_results,
                                               save_path=f'{save_dir}/decision_boundary_pca.png')
+        '''
         
         # Feature importance analysis
         importance_df = self.analyze_feature_importance_for_confusion(analysis_results)
@@ -1313,12 +1315,14 @@ def recreate_dataloaders_from_checkpoint(checkpoint, data_dir, device):
     
     return train_loader, val_loader
 
+from sklearn.utils.class_weight import compute_class_weight
+
 
 # dropout may 0.2 or 0.3 or 0.5 based on experiments
 # Reduced channels from 64, 128, 256 for complexity
 # Consider replaceing the single 7x7 kernal with three 
 def train_model(data_dir, feature_names, 
-                              sequence_length=80, stride=20,
+                              sequence_length=80, stride=40,
                               num_channels=[32, 64, 128],
                               kernel_size=7, dropout=0.5,
                               learning_rate=1e-3, weight_decay=1e-3,
@@ -1381,6 +1385,14 @@ def train_model(data_dir, feature_names,
     print(f"Val: {X_val.shape}, {y_val.shape}")
     print(f"Label distribution (train): {np.bincount(y_train)}")
     print(f"Label distribution (val): {np.bincount(y_val)}")
+
+    class_weights = compute_class_weight(
+        class_weight = 'balanced',
+        classes=np.unique(y_train),
+        y=y_train
+    )
+
+    class_weights_tensor = torch.FloatTensor(class_weights).to(device)
     
     # Convert to tensors
     X_train_tensor = torch.FloatTensor(X_train).to(device)
@@ -1410,7 +1422,7 @@ def train_model(data_dir, feature_names,
     
     # Training setup
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
     scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
         optimizer, T_0=10, T_mult=2
     )
