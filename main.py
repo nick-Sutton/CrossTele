@@ -5,7 +5,7 @@ import torch
 from util import reformat_data
 from util import data_fixer
 import pandas as pd
-from training.train import train_model
+from training.train import analyze_misclassification, train_model
 
 if __name__ == '__main__':
     
@@ -31,6 +31,13 @@ if __name__ == '__main__':
         feature_names=feature_names,
         run_analysis=True,
         save_dir='./models'
+    )
+
+    analyzer, results = analyze_misclassification(
+        checkpoint_path='models/gait_model_20241023_123456.pth',
+        data_dir='path/to/your/data',
+        true_class='stand',
+        pred_class='walk'
     )
     
 

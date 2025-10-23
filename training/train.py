@@ -19,6 +19,485 @@ from sklearn.metrics import (
 from collections import defaultdict
 import json
 
+class FeatureMisclassificationAnalyzer:
+    """Analyze features of misclassified instances to understand decision boundaries"""
+    
+    def __init__(self, model, preprocessor, device):
+        self.model = model
+        self.preprocessor = preprocessor
+        self.device = device
+        self.class_names = preprocessor.label_encoder.classes_
+    
+    def get_raw_sequences_with_predictions(self, data_loader, indices):
+        """Extract raw sequences for specific indices"""
+        # Convert DataLoader back to sequences
+        all_sequences = []
+        all_labels = []
+        
+        for batch_X, batch_y in data_loader:
+            all_sequences.append(batch_X.cpu().numpy())
+            all_labels.append(batch_y.cpu().numpy())
+        
+        all_sequences = np.vstack(all_sequences)
+        all_labels = np.concatenate(all_labels)
+        
+        # Extract requested indices
+        selected_sequences = all_sequences[indices]
+        selected_labels = all_labels[indices]
+        
+        return selected_sequences, selected_labels
+    
+    def analyze_specific_misclassification(self, val_loader, 
+                                          true_class_name, pred_class_name, 
+                                          n_samples=20):
+        """Analyze specific type of misclassification (e.g., standing→walking)"""
+        
+        print(f"\n{'='*80}")
+        print(f"ANALYZING: {true_class_name} → {pred_class_name}")
+        print(f"{'='*80}\n")
+        
+        # Get predictions
+        self.model.eval()
+        all_preds = []
+        all_labels = []
+        all_probs = []
+        
+        with torch.no_grad():
+            for batch_X, batch_y in val_loader:
+                outputs = self.model(batch_X)
+                probs = F.softmax(outputs, dim=1)
+                _, preds = torch.max(outputs, 1)
+                
+                all_preds.extend(preds.cpu().numpy())
+                all_probs.extend(probs.cpu().numpy())
+                all_labels.extend(batch_y.cpu().numpy())
+        
+        all_preds = np.array(all_preds)
+        all_labels = np.array(all_labels)
+        all_probs = np.array(all_probs)
+        
+        # Find target misclassification indices
+        true_idx = list(self.class_names).index(true_class_name)
+        pred_idx = list(self.class_names).index(pred_class_name)
+        
+        misclass_mask = (all_labels == true_idx) & (all_preds == pred_idx)
+        misclass_indices = np.where(misclass_mask)[0]
+        
+        # Also get correctly classified samples for comparison
+        correct_true_mask = (all_labels == true_idx) & (all_preds == true_idx)
+        correct_true_indices = np.where(correct_true_mask)[0]
+        
+        correct_pred_mask = (all_labels == pred_idx) & (all_preds == pred_idx)
+        correct_pred_indices = np.where(correct_pred_mask)[0]
+        
+        print(f"Found {len(misclass_indices)} instances of {true_class_name}→{pred_class_name}")
+        print(f"Found {len(correct_true_indices)} correctly classified {true_class_name}")
+        print(f"Found {len(correct_pred_indices)} correctly classified {pred_class_name}\n")
+        
+        if len(misclass_indices) == 0:
+            print("No misclassifications of this type found!")
+            return None
+        
+        # Sample for analysis
+        n_misclass = min(n_samples, len(misclass_indices))
+        n_correct_true = min(n_samples, len(correct_true_indices))
+        n_correct_pred = min(n_samples, len(correct_pred_indices))
+        
+        sample_misclass = np.random.choice(misclass_indices, n_misclass, replace=False)
+        sample_correct_true = np.random.choice(correct_true_indices, n_correct_true, replace=False)
+        sample_correct_pred = np.random.choice(correct_pred_indices, n_correct_pred, replace=False)
+        
+        # Get raw sequences
+        misclass_seqs, _ = self.get_raw_sequences_with_predictions(val_loader, sample_misclass)
+        correct_true_seqs, _ = self.get_raw_sequences_with_predictions(val_loader, sample_correct_true)
+        correct_pred_seqs, _ = self.get_raw_sequences_with_predictions(val_loader, sample_correct_pred)
+        
+        # Get feature names from preprocessor
+        feature_names = self.preprocessor.processed_feature_names
+        
+        return {
+            'misclass_seqs': misclass_seqs,
+            'correct_true_seqs': correct_true_seqs,
+            'correct_pred_seqs': correct_pred_seqs,
+            'misclass_probs': all_probs[sample_misclass],
+            'misclass_indices': sample_misclass,
+            'feature_names': feature_names,
+            'true_class': true_class_name,
+            'pred_class': pred_class_name
+        }
+    
+    def plot_feature_distributions(self, analysis_results, save_path=None):
+        """Compare feature distributions between misclassified and correct samples"""
+        
+        misclass = analysis_results['misclass_seqs']
+        correct_true = analysis_results['correct_true_seqs']
+        correct_pred = analysis_results['correct_pred_seqs']
+        feature_names = analysis_results['feature_names']
+        true_class = analysis_results['true_class']
+        pred_class = analysis_results['pred_class']
+        
+        n_features = misclass.shape[2]  # shape is [samples, time, features]
+        n_rows = (n_features + 2) // 3
+        
+        fig, axes = plt.subplots(n_rows, 3, figsize=(18, 5*n_rows))
+        axes = axes.flatten()
+        
+        for i in range(n_features):
+            ax = axes[i]
+            feature = feature_names[i]
+            
+            # Calculate mean across time dimension for each sample
+            misclass_mean = np.mean(misclass[:, :, i], axis=1)
+            correct_true_mean = np.mean(correct_true[:, :, i], axis=1)
+            correct_pred_mean = np.mean(correct_pred[:, :, i], axis=1)
+            
+            # Plot distributions
+            ax.hist(correct_true_mean, bins=20, alpha=0.5, label=f'Correct {true_class}', 
+                   color='green', density=True)
+            ax.hist(misclass_mean, bins=20, alpha=0.5, label=f'Misclassified', 
+                   color='red', density=True)
+            ax.hist(correct_pred_mean, bins=20, alpha=0.5, label=f'Correct {pred_class}', 
+                   color='blue', density=True)
+            
+            ax.set_xlabel(f'{feature} (mean)', fontsize=10)
+            ax.set_ylabel('Density', fontsize=10)
+            ax.set_title(f'{feature} Distribution', fontsize=11, fontweight='bold')
+            ax.legend(fontsize=8)
+            ax.grid(alpha=0.3)
+            
+            # Add statistical annotation
+            true_mean = np.mean(correct_true_mean)
+            misclass_mean_val = np.mean(misclass_mean)
+            pred_mean = np.mean(correct_pred_mean)
+            
+            textstr = f'μ_true: {true_mean:.3f}\nμ_misc: {misclass_mean_val:.3f}\nμ_pred: {pred_mean:.3f}'
+            ax.text(0.02, 0.98, textstr, transform=ax.transAxes, fontsize=8,
+                   verticalalignment='top', bbox=dict(boxstyle='round', 
+                   facecolor='wheat', alpha=0.5))
+        
+        # Hide unused subplots
+        for i in range(n_features, len(axes)):
+            axes[i].set_visible(False)
+        
+        plt.suptitle(f'Feature Distributions: {true_class} vs {pred_class} (Misclassified vs Correct)', 
+                    fontsize=14, fontweight='bold')
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.show()
+    
+    def plot_feature_statistics(self, analysis_results, save_path=None):
+        """Plot comprehensive statistics: mean, std, min, max"""
+        
+        misclass = analysis_results['misclass_seqs']
+        correct_true = analysis_results['correct_true_seqs']
+        correct_pred = analysis_results['correct_pred_seqs']
+        feature_names = analysis_results['feature_names']
+        true_class = analysis_results['true_class']
+        pred_class = analysis_results['pred_class']
+        
+        n_features = misclass.shape[2]
+        stats = ['mean', 'std', 'min', 'max']
+        
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        axes = axes.flatten()
+        
+        for stat_idx, stat in enumerate(stats):
+            ax = axes[stat_idx]
+            
+            # Calculate statistic for each feature
+            misclass_stats = []
+            correct_true_stats = []
+            correct_pred_stats = []
+            
+            for i in range(n_features):
+                if stat == 'mean':
+                    misclass_stats.append(np.mean(misclass[:, :, i]))
+                    correct_true_stats.append(np.mean(correct_true[:, :, i]))
+                    correct_pred_stats.append(np.mean(correct_pred[:, :, i]))
+                elif stat == 'std':
+                    misclass_stats.append(np.std(misclass[:, :, i]))
+                    correct_true_stats.append(np.std(correct_true[:, :, i]))
+                    correct_pred_stats.append(np.std(correct_pred[:, :, i]))
+                elif stat == 'min':
+                    misclass_stats.append(np.min(misclass[:, :, i]))
+                    correct_true_stats.append(np.min(correct_true[:, :, i]))
+                    correct_pred_stats.append(np.min(correct_pred[:, :, i]))
+                elif stat == 'max':
+                    misclass_stats.append(np.max(misclass[:, :, i]))
+                    correct_true_stats.append(np.max(correct_true[:, :, i]))
+                    correct_pred_stats.append(np.max(correct_pred[:, :, i]))
+            
+            x = np.arange(n_features)
+            width = 0.25
+            
+            ax.bar(x - width, correct_true_stats, width, label=f'Correct {true_class}', 
+                  color='green', alpha=0.7)
+            ax.bar(x, misclass_stats, width, label='Misclassified', 
+                  color='red', alpha=0.7)
+            ax.bar(x + width, correct_pred_stats, width, label=f'Correct {pred_class}', 
+                  color='blue', alpha=0.7)
+            
+            ax.set_xlabel('Features', fontsize=11)
+            ax.set_ylabel(stat.capitalize(), fontsize=11)
+            ax.set_title(f'{stat.capitalize()} by Feature', fontsize=12, fontweight='bold')
+            ax.set_xticks(x)
+            ax.set_xticklabels(feature_names[:n_features], rotation=45, ha='right')
+            ax.legend(fontsize=9)
+            ax.grid(alpha=0.3, axis='y')
+        
+        plt.suptitle(f'Feature Statistics Comparison: {true_class} → {pred_class}', 
+                    fontsize=14, fontweight='bold')
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.show()
+    
+    def plot_time_series_comparison(self, analysis_results, n_examples=3, save_path=None):
+        """Plot time series of misclassified vs correct samples"""
+        
+        misclass = analysis_results['misclass_seqs']
+        correct_true = analysis_results['correct_true_seqs']
+        correct_pred = analysis_results['correct_pred_seqs']
+        feature_names = analysis_results['feature_names']
+        true_class = analysis_results['true_class']
+        pred_class = analysis_results['pred_class']
+        
+        n_features = misclass.shape[2]
+        n_examples = min(n_examples, len(misclass))
+        
+        fig, axes = plt.subplots(n_features, 3, figsize=(18, 3*n_features))
+        if n_features == 1:
+            axes = axes.reshape(1, -1)
+        
+        for feat_idx in range(n_features):
+            for col_idx in range(3):
+                ax = axes[feat_idx, col_idx]
+                
+                if col_idx == 0:  # Correct true class
+                    data = correct_true[:n_examples, :, feat_idx]
+                    title = f'Correct {true_class}'
+                    color = 'green'
+                elif col_idx == 1:  # Misclassified
+                    data = misclass[:n_examples, :, feat_idx]
+                    title = f'Misclassified as {pred_class}'
+                    color = 'red'
+                else:  # Correct pred class
+                    data = correct_pred[:n_examples, :, feat_idx]
+                    title = f'Correct {pred_class}'
+                    color = 'blue'
+                
+                # Plot each example
+                for i in range(len(data)):
+                    ax.plot(data[i], alpha=0.6, linewidth=1.5, color=color)
+                
+                # Plot mean
+                mean_data = np.mean(data, axis=0)
+                ax.plot(mean_data, color='black', linewidth=2.5, label='Mean', linestyle='--')
+                
+                if feat_idx == 0:
+                    ax.set_title(title, fontsize=12, fontweight='bold')
+                
+                ax.set_ylabel(feature_names[feat_idx], fontsize=10)
+                
+                if feat_idx == n_features - 1:
+                    ax.set_xlabel('Time Step', fontsize=10)
+                
+                ax.grid(alpha=0.3)
+                if feat_idx == 0 and col_idx == 0:
+                    ax.legend(fontsize=8)
+        
+        plt.suptitle(f'Time Series Comparison: {true_class} → {pred_class}', 
+                    fontsize=14, fontweight='bold')
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.show()
+    
+    def plot_decision_boundary_projection(self, analysis_results, save_path=None):
+        """Project data to 2D using PCA and visualize decision boundary region"""
+        from sklearn.decomposition import PCA
+        
+        misclass = analysis_results['misclass_seqs']
+        correct_true = analysis_results['correct_true_seqs']
+        correct_pred = analysis_results['correct_pred_seqs']
+        true_class = analysis_results['true_class']
+        pred_class = analysis_results['pred_class']
+        
+        # Flatten sequences for PCA: [samples, time*features]
+        misclass_flat = misclass.reshape(len(misclass), -1)
+        correct_true_flat = correct_true.reshape(len(correct_true), -1)
+        correct_pred_flat = correct_pred.reshape(len(correct_pred), -1)
+        
+        # Combine all data for PCA fitting
+        all_data = np.vstack([misclass_flat, correct_true_flat, correct_pred_flat])
+        
+        # Apply PCA
+        pca = PCA(n_components=2)
+        pca.fit(all_data)
+        
+        misclass_pca = pca.transform(misclass_flat)
+        correct_true_pca = pca.transform(correct_true_flat)
+        correct_pred_pca = pca.transform(correct_pred_flat)
+        
+        # Plot
+        fig, ax = plt.subplots(1, 1, figsize=(12, 10))
+        
+        ax.scatter(correct_true_pca[:, 0], correct_true_pca[:, 1], 
+                  c='green', alpha=0.6, s=100, label=f'Correct {true_class}', 
+                  edgecolors='black', linewidth=0.5)
+        ax.scatter(misclass_pca[:, 0], misclass_pca[:, 1], 
+                  c='red', alpha=0.8, s=150, marker='X', 
+                  label=f'Misclassified {true_class}→{pred_class}', 
+                  edgecolors='black', linewidth=1)
+        ax.scatter(correct_pred_pca[:, 0], correct_pred_pca[:, 1], 
+                  c='blue', alpha=0.6, s=100, label=f'Correct {pred_class}', 
+                  edgecolors='black', linewidth=0.5)
+        
+        ax.set_xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.1%} variance)', fontsize=12)
+        ax.set_ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.1%} variance)', fontsize=12)
+        ax.set_title(f'Decision Boundary Visualization (PCA Projection)\n{true_class} vs {pred_class}', 
+                    fontsize=14, fontweight='bold')
+        ax.legend(fontsize=11, loc='best')
+        ax.grid(alpha=0.3)
+        
+        plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.show()
+        
+        print(f"\nPCA Explained Variance: {pca.explained_variance_ratio_[0]:.2%} + {pca.explained_variance_ratio_[1]:.2%} = {sum(pca.explained_variance_ratio_[:2]):.2%}")
+    
+    def analyze_feature_importance_for_confusion(self, analysis_results):
+        """Calculate which features differ most between misclassified and correct samples"""
+        
+        misclass = analysis_results['misclass_seqs']
+        correct_true = analysis_results['correct_true_seqs']
+        feature_names = analysis_results['feature_names']
+        true_class = analysis_results['true_class']
+        pred_class = analysis_results['pred_class']
+        
+        n_features = misclass.shape[2]
+        
+        print(f"\n{'='*80}")
+        print(f"FEATURE IMPORTANCE FOR {true_class} → {pred_class} CONFUSION")
+        print(f"{'='*80}\n")
+        
+        importance_scores = []
+        
+        for i in range(n_features):
+            # Calculate statistics across all samples and time
+            misclass_mean = np.mean(misclass[:, :, i])
+            correct_true_mean = np.mean(correct_true[:, :, i])
+            misclass_std = np.std(misclass[:, :, i])
+            correct_true_std = np.std(correct_true[:, :, i])
+            
+            # Distance between distributions (normalized)
+            mean_diff = abs(misclass_mean - correct_true_mean)
+            std_avg = (misclass_std + correct_true_std) / 2
+            normalized_diff = mean_diff / (std_avg + 1e-8)
+            
+            importance_scores.append({
+                'feature': feature_names[i],
+                'misclass_mean': misclass_mean,
+                'correct_mean': correct_true_mean,
+                'mean_diff': mean_diff,
+                'importance': normalized_diff
+            })
+        
+        # Sort by importance
+        importance_df = pd.DataFrame(importance_scores)
+        importance_df = importance_df.sort_values('importance', ascending=False)
+        
+        print("Features ranked by importance in misclassification:\n")
+        print(importance_df.to_string(index=False))
+        
+        print(f"\n{'='*80}\n")
+        
+        return importance_df
+    
+    def generate_misclassification_report(self, val_loader, 
+                                         true_class_name, pred_class_name,
+                                         save_dir='misclass_analysis'):
+        """Generate complete analysis report for specific misclassification"""
+        import os
+        os.makedirs(save_dir, exist_ok=True)
+        
+        print(f"\n{'='*80}")
+        print(f"MISCLASSIFICATION ANALYSIS: {true_class_name} → {pred_class_name}")
+        print(f"{'='*80}\n")
+        
+        # Analyze misclassification
+        analysis_results = self.analyze_specific_misclassification(
+            val_loader, true_class_name, pred_class_name, n_samples=30
+        )
+        
+        if analysis_results is None:
+            return None
+        
+        # Generate visualizations
+        print("\n📊 Generating feature distributions...")
+        self.plot_feature_distributions(analysis_results, 
+                                       save_path=f'{save_dir}/feature_distributions.png')
+        
+        print("\n📈 Generating feature statistics...")
+        self.plot_feature_statistics(analysis_results,
+                                    save_path=f'{save_dir}/feature_statistics.png')
+        
+        print("\n📉 Generating time series comparison...")
+        self.plot_time_series_comparison(analysis_results, n_examples=5,
+                                        save_path=f'{save_dir}/time_series_comparison.png')
+        
+        print("\n🎯 Generating decision boundary projection...")
+        self.plot_decision_boundary_projection(analysis_results,
+                                              save_path=f'{save_dir}/decision_boundary_pca.png')
+        
+        # Feature importance analysis
+        importance_df = self.analyze_feature_importance_for_confusion(analysis_results)
+        importance_df.to_csv(f'{save_dir}/feature_importance.csv', index=False)
+        
+        print(f"\n✅ Analysis complete! Results saved to '{save_dir}/'")
+        print(f"{'='*80}\n")
+        
+        return analysis_results, importance_df
+
+
+# Convenience function
+def analyze_misclassification(checkpoint_path, data_dir, 
+                             true_class='stand', pred_class='walk'):
+    """
+    Complete convenience function to load model and analyze misclassifications
+    
+    Usage:
+        analyzer, results = analyze_misclassification(
+            'models/gait_model_20241023_123456.pth',
+            'data/processed',
+            true_class='stand',
+            pred_class='walk'
+        )
+    """
+    # Load model
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model, preprocessor, checkpoint = load_model_comprehensive(checkpoint_path, device)
+    
+    # Recreate dataloaders
+    train_loader, val_loader = recreate_dataloaders_from_checkpoint(
+        checkpoint, data_dir, device
+    )
+    
+    # Run analysis
+    analyzer = FeatureMisclassificationAnalyzer(model, preprocessor, device)
+    results = analyzer.generate_misclassification_report(
+        val_loader, true_class, pred_class,
+        save_dir=f'misclass_analysis_{true_class}_to_{pred_class}'
+    )
+    
+    return analyzer, results
+
 class ModelAnalyzer:
     """Comprehensive model analysis for gait classification"""
     
