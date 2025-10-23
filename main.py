@@ -9,7 +9,7 @@ from training.train import analyze_misclassification, train_model
 
 if __name__ == '__main__':
     
-    '''
+    
     #Train Model
     data_dir = './training/dataset/TrainingData/'
     
@@ -31,13 +31,6 @@ if __name__ == '__main__':
         feature_names=feature_names,
         run_analysis=True,
         save_dir='./models'
-    )'''
-
-    analyzer, results = analyze_misclassification(
-        checkpoint_path='models/gait_model_20251023_105245.pth',
-        data_dir='./training/dataset/TrainingData/',
-        true_class='stand',
-        pred_class='walk'
     )
     
 

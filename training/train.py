@@ -953,8 +953,9 @@ class GaitDataPreprocessor:
         self.processed_feature_names = list(features.columns)
         return features
     
-    def create_sequences_from_files(self, file_list, feature_names, sequence_length=60, stride=30):
-        """Create sequences maintaining take boundaries"""
+    def create_sequences_from_files(self, file_list, feature_names, sequence_length=60, 
+                                    stride=30, min_purity=0.9):
+        """Create sequences, skipping ambiguous label windows"""
         all_sequences = []
         all_labels = []
         
@@ -963,16 +964,19 @@ class GaitDataPreprocessor:
             features = self.prepare_features(df, feature_names)
             labels = self.label_encoder.transform(df['gait_type'])
             
-            # Create sequences within this take only
             for i in range(0, len(features) - sequence_length + 1, stride):
-                sequence = features.iloc[i:i+sequence_length].values
-                # Use mode of labels in sequence
                 label_window = labels[i:i+sequence_length]
-                label = np.bincount(label_window).argmax()
                 
-                all_sequences.append(sequence)
-                all_labels.append(label)
+                # Check label purity
+                unique, counts = np.unique(label_window, return_counts=True)
+                purity = counts.max() / len(label_window)
+                
+                if purity >= min_purity:  # At least 90% frames agree
+                    label = unique[counts.argmax()]
+                    all_sequences.append(features.iloc[i:i+sequence_length].values)
+                    all_labels.append(label)
         
+        print(f"Kept {len(all_sequences)} pure sequences (discarded ambiguous ones)")
         return np.array(all_sequences), np.array(all_labels)
     
     def fit_transform(self, train_files, feature_names, sequence_length=60, stride=30):
